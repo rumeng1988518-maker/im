@@ -95,7 +95,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 1))],
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 1))],
                         ),
                         child: Row(
                           children: [
@@ -127,6 +127,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
                                 }
                               },
                               style: ElevatedButton.styleFrom(
+                                minimumSize: const Size(0, 36),
                                 padding: const EdgeInsets.symmetric(horizontal: 16),
                               ),
                               child: const Text('添加', style: TextStyle(fontSize: 13)),
