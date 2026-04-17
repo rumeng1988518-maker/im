@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/socket_service.dart';
+import 'package:im_client/services/notification_service.dart';
 
 class ContactsProvider extends ChangeNotifier {
   final ApiClient api;
@@ -93,6 +94,13 @@ class ContactsProvider extends ChangeNotifier {
     _pendingRequestCount++;
     notifyListeners();
     loadFriendRequests();
+    // 发送系统通知栏通知
+    final fromName = (data is Map ? data['nickname'] ?? data['fromNickname'] ?? data['fromName'] : null)?.toString() ?? '某人';
+    final message = (data is Map ? data['message'] : null)?.toString();
+    NotificationService().showFriendRequestNotification(
+      fromName: fromName,
+      message: message,
+    );
   }
 
   void _onFriendAdded(dynamic data) {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/socket_service.dart';
+import 'package:im_client/services/notification_service.dart';
 import 'package:im_client/utils/notification_sound.dart';
 
 class ChatProvider extends ChangeNotifier {
@@ -349,6 +350,22 @@ class ChatProvider extends ChangeNotifier {
         final isDisturb = _conversations[convIdx]['isDisturb'] == true;
         if (!isDisturb) {
           NotificationSound.play();
+          // 发送系统通知栏通知
+          final senderName = msg['senderNickname']?.toString() ?? msg['senderName']?.toString() ?? '新消息';
+          String body;
+          switch (msg['type']) {
+            case 1: body = '[图片]'; break;
+            case 2: body = '[语音]'; break;
+            case 3: body = '[视频]'; break;
+            case 4: body = '[文件]'; break;
+            case 5: body = '[位置]'; break;
+            default: body = msg['content']?.toString() ?? '你收到一条新消息';
+          }
+          NotificationService().showMessageNotification(
+            senderName: senderName,
+            body: body,
+            conversationId: convId,
+          );
         }
       }
       _sortConversations();

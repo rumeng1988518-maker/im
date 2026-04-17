@@ -13,9 +13,11 @@ import 'package:im_client/pages/home_page.dart';
 import 'package:im_client/pages/call_page.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
+import 'package:im_client/services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService().init();
   final auth = AuthService();
   await auth.init();
 
