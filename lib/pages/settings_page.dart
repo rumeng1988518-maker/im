@@ -228,6 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
               context.read<SocketService>().disconnect();
               await context.read<AuthService>().logout();
               if (context.mounted) {
+                AppToast.show(context, '已退出登录');
                 Navigator.of(context).popUntil((route) => route.isFirst);
               }
             },

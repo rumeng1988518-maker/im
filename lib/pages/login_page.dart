@@ -54,6 +54,7 @@ class _LoginPageState extends State<LoginPage> {
       await auth.setAuth(Map<String, dynamic>.from(data));
 
       if (!mounted) return;
+      AppToast.show(context, '登录成功');
       // Pop all auth pages back to root
       Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {

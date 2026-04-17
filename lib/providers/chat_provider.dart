@@ -334,9 +334,30 @@ class ChatProvider extends ChangeNotifier {
     _peerTyping[convId] = false;
 
     _messages.putIfAbsent(convId, () => []);
-    if (!_messages[convId]!.any((m) => m['messageId'] == msg['messageId'])) {
-      _messages[convId]!.add(msg);
+
+    // 去重：检查 messageId 以及 clientMsgId（防止 socket 推送与本地 pending 消息重复）
+    final msgId = msg['messageId']?.toString();
+    final clientMsgId = msg['clientMsgId']?.toString();
+    final list = _messages[convId]!;
+    final alreadyExists = list.any((m) {
+      if (m['messageId']?.toString() == msgId) return true;
+      if (clientMsgId != null && clientMsgId.isNotEmpty && m['clientMsgId']?.toString() == clientMsgId) return true;
+      return false;
+    });
+    if (alreadyExists) {
+      // 如果是 pending 消息（sendState == sending），用服务端数据更新它
+      final pendingIdx = list.indexWhere((m) =>
+        clientMsgId != null && clientMsgId.isNotEmpty && m['clientMsgId']?.toString() == clientMsgId && m['sendState'] == 'sending');
+      if (pendingIdx >= 0) {
+        list[pendingIdx]['messageId'] = msgId;
+        list[pendingIdx]['sendState'] = 'sent';
+        list[pendingIdx]['status'] = 1;
+        list[pendingIdx]['createdAt'] = msg['createdAt'] ?? list[pendingIdx]['createdAt'];
+        notifyListeners();
+      }
+      return;
     }
+    list.add(msg);
 
     // 即时更新会话列表的 lastMessage，避免需要等 loadConversations
     final convIdx = _conversations.indexWhere((c) => c['conversationId']?.toString() == convId);

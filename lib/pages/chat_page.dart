@@ -1293,11 +1293,14 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ],
       ),
-      body: Container(
-        color: AppColors.bgContent,
-        child: Column(
-          children: [
-            // Messages
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          color: AppColors.bgContent,
+          child: Column(
+            children: [
+              // Messages
             Expanded(
               child: Consumer<ChatProvider>(
                 builder: (context, chat, _) {
@@ -1362,6 +1365,7 @@ class _ChatPageState extends State<ChatPage> {
             _buildInputBar(),
           ],
         ),
+      ),
       ),
     );
   }

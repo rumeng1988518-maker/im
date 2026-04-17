@@ -60,6 +60,7 @@ class _CallPageState extends State<CallPage> {
   bool _initialOfferSent = false;
   bool _remoteDescriptionReady = false;
   bool _pendingOfferAfterInit = false;
+  final Completer<void> _audioReady = Completer<void>();
   Map<String, dynamic>? _pendingRemoteSdp;
   String _statusText = '正在拨号...';
   Timer? _durationTimer;
@@ -201,11 +202,14 @@ class _CallPageState extends State<CallPage> {
       _audioTrack = track;
       await _peer?.addTrack(track, stream);
     }
+    if (!_audioReady.isCompleted) _audioReady.complete();
   }
 
   Future<void> _createAndSendOffer({bool force = false}) async {
     if (_peer == null) return;
     if (!force && _initialOfferSent) return;
+    // 等待本地音频就绪（首次授权可能有延迟）
+    await _audioReady.future;
     if (!force) {
       _initialOfferSent = true;
     }
@@ -229,6 +233,8 @@ class _CallPageState extends State<CallPage> {
 
   Future<void> _createAndSendAnswer() async {
     if (_peer == null) return;
+    // 等待本地音频就绪（首次授权可能有延迟）
+    await _audioReady.future;
     final answer = await _peer!.createAnswer({
       'offerToReceiveAudio': 1,
       'offerToReceiveVideo': 1,

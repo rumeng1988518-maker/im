@@ -36,28 +36,53 @@ void main() async {
   runApp(IMApp(auth: auth));
 }
 
-class IMApp extends StatelessWidget {
+class IMApp extends StatefulWidget {
   final AuthService auth;
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   const IMApp({super.key, required this.auth});
 
   @override
-  Widget build(BuildContext context) {
-    final socketService = SocketService();
-    final apiClient = ApiClient(auth, baseUrl: AppConfig.baseUrl);
+  State<IMApp> createState() => _IMAppState();
+}
 
+class _IMAppState extends State<IMApp> {
+  late final SocketService _socketService;
+  late final ApiClient _apiClient;
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _socketService = SocketService();
+    _apiClient = ApiClient(widget.auth, baseUrl: AppConfig.baseUrl);
+  }
+
+  void _connectAndLoad(BuildContext context) {
+    if (_initialized) return;
+    _initialized = true;
+    final token = widget.auth.token;
+    if (token != null) {
+      _socketService.connect(token);
+      context.read<ChatProvider>().loadConversations().catchError((_) {});
+      context.read<ContactsProvider>().loadFriends().catchError((_) {});
+      context.read<ContactsProvider>().loadFriendRequests().catchError((_) {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: auth),
-        Provider.value(value: apiClient),
-        Provider.value(value: socketService),
-        ChangeNotifierProvider(create: (_) => CallProvider(api: apiClient, socket: socketService, auth: auth)),
-        ChangeNotifierProvider(create: (_) => ChatProvider(api: apiClient, socket: socketService)),
-        ChangeNotifierProvider(create: (_) => ContactsProvider(api: apiClient, socket: socketService)),
+        ChangeNotifierProvider.value(value: widget.auth),
+        Provider.value(value: _apiClient),
+        Provider.value(value: _socketService),
+        ChangeNotifierProvider(create: (_) => CallProvider(api: _apiClient, socket: _socketService, auth: widget.auth)),
+        ChangeNotifierProvider(create: (_) => ChatProvider(api: _apiClient, socket: _socketService)),
+        ChangeNotifierProvider(create: (_) => ContactsProvider(api: _apiClient, socket: _socketService)),
       ],
       child: MaterialApp(
-        navigatorKey: navigatorKey,
+        navigatorKey: IMApp.navigatorKey,
         title: AppConfig.appName,
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
@@ -69,15 +94,13 @@ class IMApp extends StatelessWidget {
             }
             if (auth.isLoggedIn) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (auth.token != null) {
-                  socketService.connect(auth.token!);
-                  context.read<ChatProvider>().loadConversations().catchError((_) {});
-                  context.read<ContactsProvider>().loadFriends().catchError((_) {});
-                  context.read<ContactsProvider>().loadFriendRequests().catchError((_) {});
-                }
+                _connectAndLoad(context);
               });
               return const HomePage();
             }
+            // 已退出登录，重置标记以便下次登录时重新连接
+            _initialized = false;
+            _socketService.disconnect();
             return const LandingPage();
           },
         ),
