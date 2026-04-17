@@ -1,4 +1,4 @@
-package com.imapp.im_client
+package XOEh.KNNGmEXEFC.XieKRW
 
 import io.flutter.embedding.android.FlutterActivity
 
