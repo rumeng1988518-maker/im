@@ -14,6 +14,7 @@ import 'package:im_client/pages/call_page.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/services/notification_service.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -94,8 +95,33 @@ class _IncomingCallGate extends StatefulWidget {
   State<_IncomingCallGate> createState() => _IncomingCallGateState();
 }
 
-class _IncomingCallGateState extends State<_IncomingCallGate> {
+class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindingObserver {
   bool _acting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      // 进入后台：开启 wakelock 防止休眠断连，显示持久通知
+      WakelockPlus.enable();
+      NotificationService().showKeepAliveNotification();
+    } else if (state == AppLifecycleState.resumed) {
+      // 回到前台：关闭 wakelock，取消持久通知
+      WakelockPlus.disable();
+      NotificationService().cancelKeepAliveNotification();
+    }
+  }
 
   Future<void> _accept(CallProvider callProvider) async {
     if (_acting) return;

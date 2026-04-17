@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/auth_service.dart';
 import 'package:im_client/services/socket_service.dart';
+import 'package:im_client/services/notification_service.dart';
 
 class IncomingCallInvite {
   final String callId;
@@ -106,6 +107,7 @@ class CallProvider extends ChangeNotifier {
       _incomingCall = null;
       _handlingIncoming = false;
       _inCall = true;
+      NotificationService().cancelCallNotification();
       notifyListeners();
 
       return CallLaunchPayload(
@@ -140,6 +142,7 @@ class CallProvider extends ChangeNotifier {
     } finally {
       _incomingCall = null;
       _handlingIncoming = false;
+      NotificationService().cancelCallNotification();
       notifyListeners();
     }
   }
@@ -147,6 +150,7 @@ class CallProvider extends ChangeNotifier {
   void clearIncomingCall() {
     if (_incomingCall == null) return;
     _incomingCall = null;
+    NotificationService().cancelCallNotification();
     notifyListeners();
   }
 
@@ -181,12 +185,19 @@ class CallProvider extends ChangeNotifier {
 
     final callerName = data['callerNickname']?.toString().trim();
     final type = data['callType']?.toString().trim();
+    final resolvedName = (callerName == null || callerName.isEmpty) ? '未知用户' : callerName;
+    final resolvedType = (type == 'video' || type == 'voice') ? type! : 'voice';
     _incomingCall = IncomingCallInvite(
       callId: callId,
       callerId: callerId,
-      callerName: (callerName == null || callerName.isEmpty) ? '未知用户' : callerName,
+      callerName: resolvedName,
       callerAvatarUrl: data['callerAvatarUrl']?.toString(),
-      callType: (type == 'video' || type == 'voice') ? type! : 'voice',
+      callType: resolvedType,
+    );
+    // 发送来电通知
+    NotificationService().showCallNotification(
+      callerName: resolvedName,
+      callType: resolvedType,
     );
     notifyListeners();
   }
@@ -199,6 +210,8 @@ class CallProvider extends ChangeNotifier {
     if (_incomingCall?.callId == callId) {
       _incomingCall = null;
     }
+    // 取消来电通知
+    NotificationService().cancelCallNotification();
     // 通话已结束/拒绝/超时，确保清除占线状态
     _inCall = false;
     _callPageCount = 0;
