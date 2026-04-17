@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/providers/contacts_provider.dart';
+import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/widgets/user_avatar.dart';
 
@@ -21,6 +22,70 @@ class _FriendRequestPageState extends State<FriendRequestPage> {
       provider.clearPendingCount();
       provider.loadFriendRequests();
     });
+  }
+
+  Future<void> _handleRequest(ContactsProvider contacts, int requestId, String action) async {
+    try {
+      await contacts.handleFriendRequest(requestId, action);
+      if (!mounted) return;
+      AppToast.show(context, action == 'accept' ? '已同意' : '已拒绝');
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, ErrorMessage.from(e, fallback: '处理失败，请稍后重试'));
+    }
+  }
+
+  Widget _buildActionArea(Map<String, dynamic> req, ContactsProvider contacts) {
+    final status = req['status'];
+    final requestId = req['requestId'] is int
+        ? req['requestId'] as int
+        : int.tryParse(req['requestId']?.toString() ?? '') ?? 0;
+
+    if (status == 0) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          OutlinedButton(
+            onPressed: () => _handleRequest(contacts, requestId, 'reject'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              side: BorderSide(color: Colors.grey[300]!),
+            ),
+            child: const Text('拒绝', style: TextStyle(fontSize: 13, color: Colors.grey)),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: () => _handleRequest(contacts, requestId, 'accept'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
+            child: const Text('同意', style: TextStyle(fontSize: 13)),
+          ),
+        ],
+      );
+    }
+
+    if (status == 1) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.green.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text('已同意', style: TextStyle(fontSize: 12, color: Colors.green)),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Text('已拒绝', style: TextStyle(fontSize: 12, color: Colors.red)),
+    );
   }
 
   @override
@@ -49,15 +114,14 @@ class _FriendRequestPageState extends State<FriendRequestPage> {
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: requests.length,
-            separatorBuilder: (_, _) => const Divider(),
+            separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final req = requests[index];
               final fromUser = req['fromUser'] as Map<String, dynamic>? ?? {};
               final nickname = (fromUser['nickname'] ?? '未知').toString();
               final avatarUrl = fromUser['avatarUrl']?.toString();
-              final requestId = req['requestId'] is int ? req['requestId'] as int : int.tryParse(req['requestId']?.toString() ?? '') ?? 0;
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Row(
                   children: [
                     UserAvatar(name: nickname, url: avatarUrl, size: 44),
@@ -72,24 +136,8 @@ class _FriendRequestPageState extends State<FriendRequestPage> {
                         ],
                       ),
                     ),
-                    if (req['status'] == 0)
-                      ElevatedButton(
-                        onPressed: () async {
-                          try {
-                            await contacts.handleFriendRequest(requestId, 'accept');
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已接受')));
-                          } catch (e) {
-                            if (!context.mounted) return;
-                            final message = ErrorMessage.from(e, fallback: '处理好友申请失败，请稍后重试');
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
-                        child: const Text('接受', style: TextStyle(fontSize: 13)),
-                      )
-                    else
-                      Text(req['status'] == 1 ? '已接受' : '已拒绝', style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                    const SizedBox(width: 8),
+                    _buildActionArea(req, contacts),
                   ],
                 ),
               );

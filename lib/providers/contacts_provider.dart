@@ -51,11 +51,17 @@ class ContactsProvider extends ChangeNotifier {
     return List<Map<String, dynamic>>.from(data?['list'] ?? data ?? []);
   }
 
-  Future<void> sendFriendRequest(int targetUserId, String message) async {
-    await api.post('/friends/requests', data: {
+  Future<Map<String, dynamic>> sendFriendRequest(int targetUserId, String message) async {
+    final result = await api.post('/friends/requests', data: {
       'targetUserId': targetUserId,
       'message': message,
     });
+    return Map<String, dynamic>.from(result ?? {});
+  }
+
+  Future<List<Map<String, dynamic>>> loadSentRequests() async {
+    final data = await api.get('/friends/requests/sent');
+    return List<Map<String, dynamic>>.from(data ?? []);
   }
 
   Future<void> handleFriendRequest(int requestId, String action) async {
