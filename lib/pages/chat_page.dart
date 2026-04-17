@@ -897,7 +897,13 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     try {
-      await _audioPlayer.play(UrlSource(resolvedUrl));
+      if (kIsWeb) {
+        await _audioPlayer.play(UrlSource(resolvedUrl));
+      } else {
+        // 移动端：先下载到本地再播放，避免 Content-Type 不兼容
+        final localPath = await _downloadVoiceToTemp(resolvedUrl, messageId);
+        await _audioPlayer.play(DeviceFileSource(localPath));
+      }
     } catch (e) {
       _clearVoicePlayState();
       if (mounted) {
@@ -905,6 +911,23 @@ class _ChatPageState extends State<ChatPage> {
         AppToast.show(context, ErrorMessage.from(e, fallback: fallback));        
       }
     }
+  }
+
+  /// 下载语音到临时目录并返回本地路径（带缓存）
+  Future<String> _downloadVoiceToTemp(String url, String messageId) async {
+    final dir = await getTemporaryDirectory();
+    final uri = Uri.parse(url);
+    final ext = uri.path.contains('.') ? uri.path.substring(uri.path.lastIndexOf('.')) : '.m4a';
+    final file = File('${dir.path}/voice_cache_$messageId$ext');
+    if (await file.exists() && (await file.length()) > 0) {
+      return file.path;
+    }
+    final response = await Dio().get<List<int>>(
+      url,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    await file.writeAsBytes(response.data!);
+    return file.path;
   }
 
   void _clearVoicePlayState() {
