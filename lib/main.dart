@@ -97,16 +97,78 @@ class _IncomingCallGate extends StatefulWidget {
 
 class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindingObserver {
   bool _acting = false;
+  bool _kickHandled = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 监听被踢下线事件
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _listenKick();
+    });
+  }
+
+  void _listenKick() {
+    try {
+      final socket = context.read<SocketService>();
+      socket.on('auth:kicked', _onKicked);
+    } catch (_) {}
+  }
+
+  void _onKicked(dynamic data) async {
+    if (_kickHandled) return;
+    _kickHandled = true;
+
+    final reason = (data is Map ? data['reason'] : null) ?? '您的账号已在其他设备登录';
+
+    // 断开 socket 并清除登录态
+    try {
+      final socket = context.read<SocketService>();
+      socket.off('auth:kicked');
+      socket.disconnect();
+    } catch (_) {}
+
+    try {
+      final auth = context.read<AuthService>();
+      await auth.logout();
+    } catch (_) {}
+
+    // 跳转到登录页并提示
+    final nav = IMApp.navigatorKey.currentState;
+    if (nav != null) {
+      nav.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LandingPage()),
+        (_) => false,
+      );
+      // 短暂延迟确保页面切换完成后再弹提示
+      await Future.delayed(const Duration(milliseconds: 300));
+      final ctx = nav.context;
+      if (ctx.mounted) {
+        showDialog(
+          context: ctx,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            title: const Text('下线通知'),
+            content: Text(reason),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+      }
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    try {
+      context.read<SocketService>().off('auth:kicked');
+    } catch (_) {}
     super.dispose();
   }
 

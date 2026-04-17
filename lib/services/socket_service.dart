@@ -39,6 +39,13 @@ class SocketService {
     _socket!.onConnectError((err) {
       _connecting = false;
       debugPrint('WS connect error: $err');
+      final errStr = err.toString();
+      // Token 无效/过期时停止重连，触发 kicked 流程
+      if (errStr.contains('令牌无效') || errStr.contains('已过期') || errStr.contains('认证失败')) {
+        debugPrint('WS auth failed, stopping reconnection');
+        _socket?.disconnect();
+        _emitLocal('auth:kicked', {'reason': '登录已过期，请重新登录'});
+      }
     });
 
     _socket!.onError((err) {
@@ -77,6 +84,7 @@ class SocketService {
     _socket!.on('call:timeout', (data) => _emitLocal('call:timeout', data));
     _socket!.on('call:sdp', (data) => _emitLocal('call:sdp', data));
     _socket!.on('call:ice-candidate', (data) => _emitLocal('call:ice-candidate', data));
+    _socket!.on('auth:kicked', (data) => _emitLocal('auth:kicked', data));
   }
 
   void disconnect() {
