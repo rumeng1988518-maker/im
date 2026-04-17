@@ -1,0 +1,5 @@
+# Ensure iOS/macOS files use LF line endings
+ios/**/*.pbxproj -text
+ios/**/*.plist eol=lf
+ios/**/*.xcconfig eol=lf
+*.sh eol=lf
