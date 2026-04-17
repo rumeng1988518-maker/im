@@ -57,7 +57,7 @@ class _AddFriendPageState extends State<AddFriendPage> {
                   child: TextField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: '输入手机号或UID搜索',
+                      hintText: '输入手机号、UID或邮箱搜索',
                       prefixIcon: const Icon(Icons.search),
                       filled: true,
                       fillColor: Colors.white,

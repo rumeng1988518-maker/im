@@ -145,47 +145,40 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     const SizedBox(height: 16),
 
                     // Code field + send button
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _codeCtrl,
-                            keyboardType: TextInputType.number,
-                            maxLength: 6,
-                            style: const TextStyle(fontSize: 16),
-                            decoration: InputDecoration(
-                              hintText: '验证码',
-                              hintStyle: const TextStyle(color: AppColors.textLight, fontSize: 15),
-                              prefixIcon: const Icon(Icons.verified_outlined, size: 20, color: Color(0xFF9CA3AF)),
-                              filled: true,
-                              fillColor: const Color(0xFFF5F6FA),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF0066FF), width: 1.5)),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                              counterText: '',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          height: 52,
-                          child: ElevatedButton(
+                    TextField(
+                      controller: _codeCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      style: const TextStyle(fontSize: 16),
+                      decoration: InputDecoration(
+                        hintText: '验证码',
+                        hintStyle: const TextStyle(color: AppColors.textLight, fontSize: 15),
+                        prefixIcon: const Icon(Icons.verified_outlined, size: 20, color: Color(0xFF9CA3AF)),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F6FA),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF0066FF), width: 1.5)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        counterText: '',
+                        suffixIcon: Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: TextButton(
                             onPressed: _countdown > 0 ? null : _sendCode,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0066FF),
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: const Color(0xFFE5E7EB),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              elevation: 0,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                            style: TextButton.styleFrom(
+                              backgroundColor: _countdown > 0 ? const Color(0xFFE5E7EB) : const Color(0xFF0066FF),
+                              foregroundColor: _countdown > 0 ? const Color(0xFF9CA3AF) : Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              minimumSize: const Size(0, 36),
                             ),
                             child: Text(
                               _countdown > 0 ? '${_countdown}s' : '发送验证码',
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _countdown > 0 ? const Color(0xFF9CA3AF) : Colors.white),
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
                             ),
                           ),
                         ),
-                      ],
+                        suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+                      ),
                     ),
                     const SizedBox(height: 16),
 

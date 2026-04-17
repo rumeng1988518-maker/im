@@ -901,7 +901,8 @@ class _ChatPageState extends State<ChatPage> {
     } catch (e) {
       _clearVoicePlayState();
       if (mounted) {
-        AppToast.show(context, ErrorMessage.from(e, fallback: '当前浏览器暂不支持该语音格式'));        
+        final fallback = kIsWeb ? '当前浏览器暂不支持该语音格式' : '语音播放失败，格式可能不兼容';
+        AppToast.show(context, ErrorMessage.from(e, fallback: fallback));        
       }
     }
   }

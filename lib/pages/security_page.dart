@@ -351,27 +351,20 @@ class _SecurityPageState extends State<SecurityPage> {
                 ),
                 const SizedBox(height: 14),
                 // Code input with send button
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: codeCtrl,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        decoration: InputDecoration(
-                          labelText: '验证码',
-                          counterText: '',
-                          prefixIcon: const Icon(Icons.verified_user_outlined, size: 20),
-                          filled: true, fillColor: const Color(0xFFF8F8F8),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
+                TextField(
+                  controller: codeCtrl,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  decoration: InputDecoration(
+                    labelText: '验证码',
+                    counterText: '',
+                    prefixIcon: const Icon(Icons.verified_user_outlined, size: 20),
+                    filled: true, fillColor: const Color(0xFFF8F8F8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
+                    suffixIcon: Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: TextButton(
                         onPressed: (countdown > 0 || sending) ? null : () async {
                           final email = emailCtrl.text.trim();
                           if (email.isEmpty || !email.contains('@')) {
@@ -389,21 +382,21 @@ class _SecurityPageState extends State<SecurityPage> {
                           }
                           setModalState(() => sending = false);
                         },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: const Color(0xFFE0E0E0),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                        style: TextButton.styleFrom(
+                          backgroundColor: (countdown > 0 || sending) ? const Color(0xFFE0E0E0) : AppColors.primary,
+                          foregroundColor: (countdown > 0 || sending) ? const Color(0xFF9CA3AF) : Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          minimumSize: const Size(0, 36),
                         ),
                         child: Text(
-                          countdown > 0 ? '${countdown}s' : (sending ? '发送中...' : '发送验证码'),
+                          countdown > 0 ? '${countdown}s' : (sending ? '...' : '发送验证码'),
                           style: const TextStyle(fontSize: 13),
                         ),
                       ),
                     ),
-                  ],
+                    suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 // Bind button
