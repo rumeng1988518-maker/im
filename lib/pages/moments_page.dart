@@ -1,7 +1,9 @@
 import 'package:dio/dio.dart';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http_parser/http_parser.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
@@ -764,11 +766,32 @@ class _PostMomentPageState extends State<_PostMomentPage> {
   Future<void> _pickImages() async {
     final remaining = 9 - _images.length;
     if (remaining <= 0) return;
-    final files = await pickImagesFromWeb(maxCount: remaining);
-    if (files.isNotEmpty && mounted) {
-      setState(() {
-        _images.addAll(files);
-      });
+
+    if (kIsWeb) {
+      final files = await pickImagesFromWeb(maxCount: remaining);
+      if (files.isNotEmpty && mounted) {
+        setState(() => _images.addAll(files));
+      }
+    } else {
+      final picker = ImagePicker();
+      List<XFile> files;
+      try {
+        files = await picker.pickMultiImage(imageQuality: 85, maxWidth: 1920);
+      } catch (_) {
+        final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1920);
+        files = file != null ? [file] : [];
+      }
+      if (files.isEmpty || !mounted) return;
+      final picked = <PickedFileData>[];
+      for (final f in files.take(remaining)) {
+        final bytes = await f.readAsBytes();
+        final ext = f.name.split('.').last.toLowerCase();
+        final mime = ['png', 'gif', 'webp'].contains(ext) ? 'image/$ext' : 'image/jpeg';
+        picked.add(PickedFileData(name: f.name, bytes: bytes, mimeType: mime));
+      }
+      if (picked.isNotEmpty && mounted) {
+        setState(() => _images.addAll(picked));
+      }
     }
   }
 

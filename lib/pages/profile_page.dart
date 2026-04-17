@@ -477,7 +477,7 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: 20),
               _buildInputField('昵称', nicknameCtrl, maxLength: 20),
               const SizedBox(height: 14),
-              _buildInputField('签名', signatureCtrl, maxLength: 50),
+              _buildInputField('签名', signatureCtrl, maxLength: 20),
               const SizedBox(height: 14),
               const Text('性别', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
               const SizedBox(height: 8),

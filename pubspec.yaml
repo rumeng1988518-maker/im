@@ -56,6 +56,7 @@ dependencies:
   flutter_local_notifications: ^19.0.0
   permission_handler: ^11.4.0
   wakelock_plus: ^1.2.8
+  gal: ^2.3.0
 
 dev_dependencies:
   flutter_test:

@@ -32,6 +32,7 @@ import 'package:im_client/pages/group_settings_page.dart';
 import 'package:im_client/pages/chat_user_settings_page.dart';
 import 'package:im_client/pages/red_packet_detail_page.dart';
 import 'package:im_client/widgets/image_gallery_page.dart';
+import 'package:im_client/utils/image_saver.dart';
 
 class ChatPage extends StatefulWidget {
   final String conversationId;
@@ -2512,14 +2513,19 @@ class _ChatPageState extends State<ChatPage> {
     if (mounted) AppToast.show(context, '已复制');
   }
 
-  void _handleSaveAction(Map<String, dynamic> msg) {
+  Future<void> _handleSaveAction(Map<String, dynamic> msg) async {
     final content = msg['content'];
     final url = AppConfig.resolveFileUrl(content is Map<String, dynamic> ? content['url']?.toString() : null);
     if (url.isEmpty) {
       AppToast.show(context, '无法获取文件地址');
       return;
     }
-    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    try {
+      await saveImageToDevice(url);
+      if (mounted) AppToast.show(context, '已保存到相册');
+    } catch (e) {
+      if (mounted) AppToast.show(context, '保存失败');
+    }
   }
 
   Future<void> _handleForwardAction(Map<String, dynamic> msg) async {

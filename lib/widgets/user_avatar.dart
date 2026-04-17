@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
 
 class UserAvatar extends StatelessWidget {
@@ -17,11 +18,12 @@ class UserAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (url != null && url!.isNotEmpty) {
+    final resolvedUrl = AppConfig.resolveFileUrl(url);
+    if (resolvedUrl.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(radius),
         child: Image.network(
-          url!,
+          resolvedUrl,
           width: size,
           height: size,
           fit: BoxFit.cover,
