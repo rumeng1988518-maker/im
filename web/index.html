@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="im_client">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>im_client</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Notification sound - "叮咚" doorbell tone via Web Audio API
+    window._playNotificationSound = function() {
+      try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var now = ctx.currentTime;
+        // "叮" - higher tone
+        var o1 = ctx.createOscillator();
+        var g1 = ctx.createGain();
+        o1.type = 'sine';
+        o1.frequency.value = 880;
+        g1.gain.setValueAtTime(0.3, now);
+        g1.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        o1.connect(g1);
+        g1.connect(ctx.destination);
+        o1.start(now);
+        o1.stop(now + 0.15);
+        // "咚" - lower tone
+        var o2 = ctx.createOscillator();
+        var g2 = ctx.createGain();
+        o2.type = 'sine';
+        o2.frequency.value = 587;
+        g2.gain.setValueAtTime(0.3, now + 0.15);
+        g2.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        o2.connect(g2);
+        g2.connect(ctx.destination);
+        o2.start(now + 0.15);
+        o2.stop(now + 0.35);
+      } catch(e) {}
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,224 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:im_client/config/app_config.dart';
+import 'package:im_client/config/theme.dart';
+import 'package:im_client/services/auth_service.dart';
+import 'package:im_client/services/api_client.dart';
+import 'package:im_client/services/socket_service.dart';
+import 'package:im_client/providers/chat_provider.dart';
+import 'package:im_client/providers/contacts_provider.dart';
+import 'package:im_client/providers/call_provider.dart';
+import 'package:im_client/pages/landing_page.dart';
+import 'package:im_client/pages/home_page.dart';
+import 'package:im_client/pages/call_page.dart';
+import 'package:im_client/utils/app_toast.dart';
+import 'package:im_client/utils/error_message.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final auth = AuthService();
+  await auth.init();
+
+  // 启动时验证本地 token 是否仍有效
+  if (auth.isLoggedIn) {
+    try {
+      final api = ApiClient(auth, baseUrl: AppConfig.baseUrl);
+      await api.get('/users/profile');
+    } catch (_) {
+      await auth.logout();
+    }
+  }
+
+  runApp(IMApp(auth: auth));
+}
+
+class IMApp extends StatelessWidget {
+  final AuthService auth;
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+  const IMApp({super.key, required this.auth});
+
+  @override
+  Widget build(BuildContext context) {
+    final socketService = SocketService();
+    final apiClient = ApiClient(auth, baseUrl: AppConfig.baseUrl);
+
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: auth),
+        Provider.value(value: apiClient),
+        Provider.value(value: socketService),
+        ChangeNotifierProvider(create: (_) => CallProvider(api: apiClient, socket: socketService, auth: auth)),
+        ChangeNotifierProvider(create: (_) => ChatProvider(api: apiClient, socket: socketService)),
+        ChangeNotifierProvider(create: (_) => ContactsProvider(api: apiClient, socket: socketService)),
+      ],
+      child: MaterialApp(
+        navigatorKey: navigatorKey,
+        title: AppConfig.appName,
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        builder: (context, child) => _IncomingCallGate(child: child ?? const SizedBox.shrink()),
+        home: Consumer<AuthService>(
+          builder: (context, auth, _) {
+            if (!auth.initialized) {
+              return const Scaffold(body: Center(child: CircularProgressIndicator()));
+            }
+            if (auth.isLoggedIn) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (auth.token != null) {
+                  socketService.connect(auth.token!);
+                  context.read<ChatProvider>().loadConversations().catchError((_) {});
+                  context.read<ContactsProvider>().loadFriends().catchError((_) {});
+                }
+              });
+              return const HomePage();
+            }
+            return const LandingPage();
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _IncomingCallGate extends StatefulWidget {
+  final Widget child;
+
+  const _IncomingCallGate({required this.child});
+
+  @override
+  State<_IncomingCallGate> createState() => _IncomingCallGateState();
+}
+
+class _IncomingCallGateState extends State<_IncomingCallGate> {
+  bool _acting = false;
+
+  Future<void> _accept(CallProvider callProvider) async {
+    if (_acting) return;
+    setState(() => _acting = true);
+
+    try {
+      final payload = await callProvider.acceptIncomingCall();
+      if (!mounted) return;
+
+      final nav = IMApp.navigatorKey.currentState;
+      if (nav == null) return;
+
+      await nav.push(
+        MaterialPageRoute(
+          builder: (_) => CallPage(
+            callId: payload.callId,
+            peerUserId: payload.peerUserId,
+            peerName: payload.peerName,
+            peerAvatarUrl: payload.peerAvatarUrl,
+            callType: payload.callType,
+            isCaller: payload.isCaller,
+            rtcConfig: payload.rtcConfig,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, ErrorMessage.from(e, fallback: '接听失败，请稍后重试'));
+    } finally {
+      if (mounted) {
+        setState(() => _acting = false);
+      }
+    }
+  }
+
+  Future<void> _reject(CallProvider callProvider) async {
+    if (_acting) return;
+    setState(() => _acting = true);
+
+    try {
+      await callProvider.rejectIncomingCall();
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, ErrorMessage.from(e, fallback: '拒绝失败，请稍后重试'));
+    } finally {
+      if (mounted) {
+        setState(() => _acting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<CallProvider>(
+      builder: (context, callProvider, _) {
+        final incoming = callProvider.incomingCall;
+        if (incoming == null) {
+          return widget.child;
+        }
+
+        return Stack(
+          children: [
+            widget.child,
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.42),
+                alignment: Alignment.center,
+                child: Container(
+                  width: 312,
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x33000000),
+                        blurRadius: 18,
+                        offset: Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        incoming.callType == 'video' ? '视频来电' : '语音来电',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        incoming.callerName,
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _acting ? null : () => _reject(callProvider),
+                              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(42)),
+                              child: const Text('拒绝'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: _acting ? null : () => _accept(callProvider),
+                              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(42)),
+                              child: _acting
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : const Text('接听'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
