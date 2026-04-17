@@ -89,34 +89,49 @@ class _AddFriendPageState extends State<AddFriendPage> {
                     itemCount: _results!.length,
                     itemBuilder: (context, index) {
                       final user = _results![index];
-                      return Card(
+                      return Container(
                         margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: UserAvatar(name: user['nickname'], url: user['avatarUrl'], size: 44),
-                          title: Text((user['nickname'] ?? '').toString()),
-                          subtitle: Text('UID: ${user['uid'] ?? ''}', style: const TextStyle(fontSize: 12)),
-                          trailing: ElevatedButton(
-                            onPressed: () async {
-                              try {
-                                final uid = user['id'] ?? user['userId'];
-                                await context.read<ContactsProvider>().sendFriendRequest(uid, '请求添加好友');
-                                if (!context.mounted) return;
-                                if (mounted) {
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 1))],
+                        ),
+                        child: Row(
+                          children: [
+                            UserAvatar(name: user['nickname'], url: user['avatarUrl'], size: 44),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text((user['nickname'] ?? '').toString(), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                                  const SizedBox(height: 2),
+                                  Text('UID: ${user['uid'] ?? ''}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton(
+                              onPressed: () async {
+                                try {
+                                  final targetId = user['userId'] ?? user['id'];
+                                  if (targetId == null) throw Exception('用户ID无效');
+                                  await context.read<ContactsProvider>().sendFriendRequest(targetId is int ? targetId : int.parse(targetId.toString()), '请求添加好友');
+                                  if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('好友申请已发送')));
-                                }
-                              } catch (e) {
-                                if (!context.mounted) return;
-                                if (mounted) {
+                                } catch (e) {
+                                  if (!context.mounted) return;
                                   final message = ErrorMessage.from(e, fallback: '发送好友申请失败，请稍后重试');
                                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
                                 }
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              },
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                              ),
+                              child: const Text('添加', style: TextStyle(fontSize: 13)),
                             ),
-                            child: const Text('添加', style: TextStyle(fontSize: 13)),
-                          ),
+                          ],
                         ),
                       );
                     },

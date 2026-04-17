@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/providers/chat_provider.dart';
+import 'package:im_client/providers/contacts_provider.dart';
 import 'package:im_client/pages/conversation_list_page.dart';
 import 'package:im_client/pages/contacts_page.dart';
 import 'package:im_client/pages/moments_page.dart';
@@ -28,12 +29,13 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _pages),
-      bottomNavigationBar: Consumer<ChatProvider>(
-        builder: (context, chat, _) {
+      bottomNavigationBar: Consumer2<ChatProvider, ContactsProvider>(
+        builder: (context, chat, contacts, _) {
           final totalUnread = chat.conversations.fold<int>(
             0,
             (sum, c) => sum + ((c['unreadCount'] as num?)?.toInt() ?? 0),
           );
+          final pendingFriends = contacts.pendingRequestCount;
           return Container(
             decoration: const BoxDecoration(
               border: Border(top: BorderSide(color: Color(0xFFE5E5E5), width: 0.5)),
@@ -69,9 +71,17 @@ class _HomePageState extends State<HomePage> {
                   ),
                   label: '内部通',
                 ),
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.contacts_outlined),
-                  activeIcon: Icon(Icons.contacts),
+                BottomNavigationBarItem(
+                  icon: Badge(
+                    isLabelVisible: pendingFriends > 0,
+                    label: Text(pendingFriends > 99 ? '99+' : '$pendingFriends', style: const TextStyle(fontSize: 10)),
+                    child: const Icon(Icons.contacts_outlined),
+                  ),
+                  activeIcon: Badge(
+                    isLabelVisible: pendingFriends > 0,
+                    label: Text(pendingFriends > 99 ? '99+' : '$pendingFriends', style: const TextStyle(fontSize: 10)),
+                    child: const Icon(Icons.contacts),
+                  ),
                   label: '通讯录',
                 ),
                 const BottomNavigationBarItem(

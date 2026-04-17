@@ -40,6 +40,7 @@ class ContactsProvider extends ChangeNotifier {
     try {
       final data = await api.get('/friends/requests');
       _friendRequests = List<Map<String, dynamic>>.from(data?['list'] ?? data ?? []);
+      _pendingRequestCount = _friendRequests.where((r) => r['status'] == 0).length;
       notifyListeners();
     } catch (_) {}
   }

@@ -17,7 +17,9 @@ class _FriendRequestPageState extends State<FriendRequestPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ContactsProvider>().loadFriendRequests();
+      final provider = context.read<ContactsProvider>();
+      provider.clearPendingCount();
+      provider.loadFriendRequests();
     });
   }
 

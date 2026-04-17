@@ -25,7 +25,8 @@ void main() async {
       final api = ApiClient(auth, baseUrl: AppConfig.baseUrl);
       await api.get('/users/profile');
     } catch (_) {
-      await auth.logout();
+      // ApiClient 拦截器会在 token 失效(40101/40102/40103)时自动 logout
+      // 网络超时等非认证错误不清除登录态，保留离线可用性
     }
   }
 
@@ -69,6 +70,7 @@ class IMApp extends StatelessWidget {
                   socketService.connect(auth.token!);
                   context.read<ChatProvider>().loadConversations().catchError((_) {});
                   context.read<ContactsProvider>().loadFriends().catchError((_) {});
+                  context.read<ContactsProvider>().loadFriendRequests().catchError((_) {});
                 }
               });
               return const HomePage();
