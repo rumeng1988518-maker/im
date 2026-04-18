@@ -14,6 +14,7 @@ import 'package:im_client/pages/call_page.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/services/notification_service.dart';
+import 'package:im_client/utils/notification_sound.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 void main() async {
@@ -128,6 +129,7 @@ class _IncomingCallGate extends StatefulWidget {
 class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindingObserver {
   bool _acting = false;
   bool _kickHandled = false;
+  bool _ringing = false;
 
   @override
   void initState() {
@@ -278,7 +280,16 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       builder: (context, callProvider, _) {
         final incoming = callProvider.incomingCall;
         if (incoming == null) {
+          if (_ringing) {
+            _ringing = false;
+            NotificationSound.stopRingtone();
+          }
           return widget.child;
+        }
+
+        if (!_ringing) {
+          _ringing = true;
+          NotificationSound.playRingtone();
         }
 
         return Stack(
