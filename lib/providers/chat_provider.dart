@@ -222,7 +222,11 @@ class ChatProvider extends ChangeNotifier {
     final msgs = _messages[convId];
     if (msgs == null) return;
 
-    final idx = msgs.indexWhere((m) => m['messageId'] == localId);
+    var idx = msgs.indexWhere((m) => m['messageId'] == localId);
+    // _onNewMessage 可能已将 messageId 改为服务端 ID，用 clientMsgId 兜底
+    if (idx < 0) {
+      idx = msgs.indexWhere((m) => m['clientMsgId'] == localId);
+    }
     if (idx < 0) return;
 
     msgs[idx]['messageId'] = result['messageId'];
@@ -244,7 +248,10 @@ class ChatProvider extends ChangeNotifier {
     final msgs = _messages[convId];
     if (msgs == null) return;
 
-    final idx = msgs.indexWhere((m) => m['messageId'] == localId);
+    var idx = msgs.indexWhere((m) => m['messageId'] == localId);
+    if (idx < 0) {
+      idx = msgs.indexWhere((m) => m['clientMsgId'] == localId);
+    }
     if (idx < 0) return;
     msgs[idx]['sendState'] = 'failed';
     notifyListeners();
@@ -253,7 +260,10 @@ class ChatProvider extends ChangeNotifier {
   void updatePendingMessageProgress(String convId, String localId, double progress) {
     final msgs = _messages[convId];
     if (msgs == null) return;
-    final idx = msgs.indexWhere((m) => m['messageId'] == localId);
+    var idx = msgs.indexWhere((m) => m['messageId'] == localId);
+    if (idx < 0) {
+      idx = msgs.indexWhere((m) => m['clientMsgId'] == localId);
+    }
     if (idx < 0) return;
     final content = msgs[idx]['content'];
     if (content is Map<String, dynamic>) {
@@ -353,6 +363,10 @@ class ChatProvider extends ChangeNotifier {
         list[pendingIdx]['sendState'] = 'sent';
         list[pendingIdx]['status'] = 1;
         list[pendingIdx]['createdAt'] = msg['createdAt'] ?? list[pendingIdx]['createdAt'];
+        // 同步服务端返回的 content（含真实 url），防止本地 content 停留在 uploading 状态
+        if (msg['content'] != null) {
+          list[pendingIdx]['content'] = msg['content'];
+        }
         notifyListeners();
       }
       return;

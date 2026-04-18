@@ -1880,7 +1880,7 @@ class _ChatPageState extends State<ChatPage> {
       return _buildMediaHint('相册发送中...');
     }
     if (sendState == 'failed' && !hasLocalBytes) {
-      return _buildMediaHint('相册发送失败');
+      return _buildMediaHint('相册发送失败', isError: true);
     }
     if (items.isEmpty) {
       return _buildMediaHint('[相册]');
@@ -2141,7 +2141,7 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (sendState == 'failed' && url.isEmpty) {
-      return _buildMediaHint('图片发送失败');
+      return _buildMediaHint('图片发送失败', isError: true);
     }
 
     if (url.isEmpty) {
@@ -2262,7 +2262,7 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (sendState == 'failed' && url.isEmpty) {
-      return _buildMediaHint('视频发送失败');
+      return _buildMediaHint('视频发送失败', isError: true);
     }
 
     return GestureDetector(
@@ -2296,15 +2296,18 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _buildMediaHint(String label) {
+  Widget _buildMediaHint(String label, {bool isError = false}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textSecondary),
-        ),
+        if (isError)
+          const Icon(Icons.error_outline, size: 16, color: AppColors.textSecondary)
+        else
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textSecondary),
+          ),
         const SizedBox(width: 8),
         Text(label, style: const TextStyle(color: AppColors.textSecondary)),
       ],

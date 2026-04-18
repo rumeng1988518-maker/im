@@ -83,7 +83,11 @@ class ApiClient {
       () => _dio.post(
         path,
         data: formData,
-        options: Options(headers: {'Content-Type': 'multipart/form-data'}),
+        options: Options(
+          headers: {'Content-Type': 'multipart/form-data'},
+          sendTimeout: const Duration(minutes: 5),
+          receiveTimeout: const Duration(minutes: 5),
+        ),
         onSendProgress: onSendProgress,
       ),
     );
