@@ -388,7 +388,7 @@ class _ChatPageState extends State<ChatPage> {
 
     // Check video size limit (200MB)
     for (var i = 0; i < files.length; i++) {
-      final mime = files[i].mimeType ?? _guessMimeType(files[i].name, false);
+      final mime = files[i].mimeType ?? _guessMimeType(files[i].name, choice == 'video');
       if (mime.startsWith('video') && allBytes[i].length > 200 * 1024 * 1024) {
         if (mounted) AppToast.show(context, '视频 ${files[i].name} 超过200MB限制');
         return;
@@ -405,7 +405,7 @@ class _ChatPageState extends State<ChatPage> {
 
     if (files.length == 1) {
       final file = files.first;
-      final mime = file.mimeType ?? _guessMimeType(file.name, false);
+      final mime = file.mimeType ?? _guessMimeType(file.name, choice == 'video');
       final isVideo = mime.startsWith('video');
       await _sendMediaMessageFromBytes(file.name, mime, allBytes.first, isVideo: isVideo);
     } else {
@@ -702,10 +702,12 @@ class _ChatPageState extends State<ChatPage> {
 
   String _guessMimeType(String fileName, bool isVideo) {
     final lower = fileName.toLowerCase();
-    if (isVideo) {
-      if (lower.endsWith('.mov')) return 'video/quicktime';
-      return 'video/mp4';
-    }
+    // Always check video extensions first (iOS image_picker may return null mimeType)
+    if (lower.endsWith('.mp4')) return 'video/mp4';
+    if (lower.endsWith('.mov')) return 'video/quicktime';
+    if (lower.endsWith('.avi')) return 'video/x-msvideo';
+    if (lower.endsWith('.mkv')) return 'video/x-matroska';
+    if (isVideo) return 'video/mp4';
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.gif')) return 'image/gif';
     if (lower.endsWith('.webp')) return 'image/webp';
@@ -2551,6 +2553,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _handleSaveAction(Map<String, dynamic> msg) async {
+    final type = _intType(msg['type']);
     final content = msg['content'];
     final url = AppConfig.resolveFileUrl(content is Map<String, dynamic> ? content['url']?.toString() : null);
     if (url.isEmpty) {
@@ -2558,7 +2561,7 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
     try {
-      await saveImageToDevice(url);
+      await saveImageToDevice(url, isVideo: type == 4);
       if (mounted) AppToast.show(context, '已保存到相册');
     } catch (e) {
       if (mounted) AppToast.show(context, '保存失败');
@@ -3001,6 +3004,7 @@ class _VideoPreviewPage extends StatefulWidget {
 
 class _VideoPreviewPageState extends State<_VideoPreviewPage> {
   VideoPlayerController? _controller;
+  bool _hasError = false;
 
   @override
   void initState() {
@@ -3008,6 +3012,8 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
       ..initialize().then((_) {
         if (mounted) setState(() {});
+      }).catchError((e) {
+        if (mounted) setState(() => _hasError = true);
       });
   }
 
@@ -3022,34 +3028,59 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
     final controller = _controller;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: () async {
+              try {
+                await saveImageToDevice(widget.videoUrl, isVideo: true);
+                if (context.mounted) AppToast.show(context, '已保存到相册');
+              } catch (_) {
+                if (context.mounted) AppToast.show(context, '保存失败');
+              }
+            },
+          ),
+        ],
+      ),
       body: Center(
-        child: (controller != null && controller.value.isInitialized)
-            ? Column(
+        child: _hasError
+            ? const Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  AspectRatio(
-                    aspectRatio: controller.value.aspectRatio,
-                    child: VideoPlayer(controller),
-                  ),
-                  const SizedBox(height: 16),
-                  IconButton(
-                    iconSize: 42,
-                    color: Colors.white,
-                    icon: Icon(controller.value.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill),
-                    onPressed: () {
-                      setState(() {
-                        if (controller.value.isPlaying) {
-                          controller.pause();
-                        } else {
-                          controller.play();
-                        }
-                      });
-                    },
-                  ),
+                  Icon(Icons.error_outline, color: Colors.white54, size: 48),
+                  SizedBox(height: 12),
+                  Text('视频加载失败', style: TextStyle(color: Colors.white54, fontSize: 15)),
                 ],
               )
-            : const CircularProgressIndicator(color: Colors.white),
+            : (controller != null && controller.value.isInitialized)
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: controller.value.aspectRatio,
+                        child: VideoPlayer(controller),
+                      ),
+                      const SizedBox(height: 16),
+                      IconButton(
+                        iconSize: 42,
+                        color: Colors.white,
+                        icon: Icon(controller.value.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill),
+                        onPressed: () {
+                          setState(() {
+                            if (controller.value.isPlaying) {
+                              controller.pause();
+                            } else {
+                              controller.play();
+                            }
+                          });
+                        },
+                      ),
+                    ],
+                  )
+                : const CircularProgressIndicator(color: Colors.white),
       ),
     );
   }
@@ -3209,10 +3240,48 @@ class _ContactCardProfilePageState extends State<_ContactCardProfilePage> {
   }
 }
 
-class _MediaPreviewPage extends StatelessWidget {
+class _MediaPreviewPage extends StatefulWidget {
   final List<XFile> files;
   final List<Uint8List> bytesData;
   const _MediaPreviewPage({required this.files, required this.bytesData});
+
+  @override
+  State<_MediaPreviewPage> createState() => _MediaPreviewPageState();
+}
+
+class _MediaPreviewPageState extends State<_MediaPreviewPage> {
+  VideoPlayerController? _videoController;
+  bool _videoError = false;
+
+  bool get _isSingleVideo {
+    if (widget.files.length != 1) return false;
+    final file = widget.files.first;
+    final mime = file.mimeType ?? '';
+    final name = file.name.toLowerCase();
+    return mime.startsWith('video') || name.endsWith('.mp4') || name.endsWith('.mov');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isSingleVideo && !kIsWeb) {
+      final path = widget.files.first.path;
+      if (path.isNotEmpty) {
+        _videoController = VideoPlayerController.file(File(path))
+          ..initialize().then((_) {
+            if (mounted) setState(() {});
+          }).catchError((e) {
+            if (mounted) setState(() => _videoError = true);
+          });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoController?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3222,52 +3291,14 @@ class _MediaPreviewPage extends StatelessWidget {
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         centerTitle: true,
-        title: Text('已选择 ${files.length} 个文件', style: const TextStyle(fontSize: 17)),
+        title: Text('已选择 ${widget.files.length} 个文件', style: const TextStyle(fontSize: 17)),
       ),
       body: Column(
         children: [
           Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.all(4),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: files.length == 1 ? 1 : 3,
-                crossAxisSpacing: 3,
-                mainAxisSpacing: 3,
-              ),
-              itemCount: files.length,
-              itemBuilder: (_, i) {
-                final file = files[i];
-                final mime = file.mimeType ?? '';
-                final isVideo = mime.startsWith('video') || file.name.toLowerCase().contains('.mp4') || file.name.toLowerCase().contains('.mov');
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (!isVideo)
-                        Image.memory(bytesData[i], fit: BoxFit.cover)
-                      else
-                        Container(
-                          color: const Color(0xFF222222),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.videocam, color: Colors.white54, size: 36),
-                              const SizedBox(height: 4),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
-                                child: Text(file.name, style: const TextStyle(color: Colors.white54, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (isVideo)
-                        const Center(child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 40)),
-                    ],
-                  ),
-                );
-              },
-            ),
+            child: _isSingleVideo && _videoController != null
+                ? _buildVideoPreview()
+                : _buildGrid(),
           ),
           SafeArea(
             child: Padding(
@@ -3278,7 +3309,7 @@ class _MediaPreviewPage extends StatelessWidget {
                 child: ElevatedButton.icon(
                   onPressed: () => Navigator.pop(context, true),
                   icon: const Icon(Icons.send_rounded, size: 20),
-                  label: Text('发送 (${files.length})', style: const TextStyle(fontSize: 16)),
+                  label: Text('发送 (${widget.files.length})', style: const TextStyle(fontSize: 16)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
@@ -3291,6 +3322,93 @@ class _MediaPreviewPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildVideoPreview() {
+    final controller = _videoController;
+    if (_videoError) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.videocam, color: Colors.white54, size: 48),
+            const SizedBox(height: 8),
+            Text(widget.files.first.name, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+    if (controller == null || !controller.value.isInitialized) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
+    }
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (controller.value.isPlaying) {
+            controller.pause();
+          } else {
+            controller.play();
+          }
+        });
+      },
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: controller.value.aspectRatio,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              VideoPlayer(controller),
+              if (!controller.value.isPlaying)
+                const Icon(Icons.play_circle_fill, color: Colors.white70, size: 56),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(4),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: widget.files.length == 1 ? 1 : 3,
+        crossAxisSpacing: 3,
+        mainAxisSpacing: 3,
+      ),
+      itemCount: widget.files.length,
+      itemBuilder: (_, i) {
+        final file = widget.files[i];
+        final mime = file.mimeType ?? '';
+        final isVideo = mime.startsWith('video') || file.name.toLowerCase().endsWith('.mp4') || file.name.toLowerCase().endsWith('.mov');
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (!isVideo)
+                Image.memory(widget.bytesData[i], fit: BoxFit.cover)
+              else
+                Container(
+                  color: const Color(0xFF222222),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.videocam, color: Colors.white54, size: 36),
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(file.name, style: const TextStyle(color: Colors.white54, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                  ),
+                ),
+              if (isVideo)
+                const Center(child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 40)),
+            ],
+          ),
+        );
+      },
     );
   }
 }
