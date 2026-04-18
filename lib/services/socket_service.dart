@@ -12,6 +12,18 @@ class SocketService {
   bool get isConnected => _socket?.connected ?? false;
   bool get isConnecting => _connecting;
 
+  /// Force reconnect even if already connected (used on app foreground resume)
+  void ensureConnected(String token) {
+    if (isConnected) return;
+    _token = token;
+    if (_socket != null && !_connecting) {
+      // Socket exists but disconnected - reconnect
+      _socket!.connect();
+    } else if (_socket == null) {
+      connect(token);
+    }
+  }
+
   void connect(String token) {
     if (_token == token && (isConnected || _connecting)) {
       return;

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/socket_service.dart';
 import 'package:im_client/services/notification_service.dart';
@@ -29,6 +31,8 @@ class ChatProvider extends ChangeNotifier {
     socket.on('conversation:dismissed', _onConversationRemoved);
     socket.on('conversation:member-removed', _onMemberRemoved);
     socket.on('conversation:updated', _onConversationUpdated);
+    // WebSocket 重连后自动刷新数据（弥补断线期间可能丢失的推送）
+    socket.on('connect', _onSocketReconnect);
   }
 
   List<Map<String, dynamic>> get conversations => _conversations;
@@ -290,6 +294,7 @@ class ChatProvider extends ChangeNotifier {
     final idx = _conversations.indexWhere((c) => c['conversationId']?.toString() == convId);
     if (idx >= 0 && ((_conversations[idx]['unreadCount'] as num?)?.toInt() ?? 0) > 0) {
       _conversations[idx]['unreadCount'] = 0;
+      _updateAppBadge();
       notifyListeners();
     }
 
@@ -345,6 +350,17 @@ class ChatProvider extends ChangeNotifier {
     final data = await api.post('/conversations/private', data: {'targetUserId': targetUserId});
     await loadConversations();
     return Map<String, dynamic>.from(data);
+  }
+
+  bool _firstConnect = true;
+  void _onSocketReconnect(dynamic _) {
+    // 首次连接由 _connectAndLoad 处理，仅处理重连
+    if (_firstConnect) {
+      _firstConnect = false;
+      return;
+    }
+    debugPrint('[ChatProvider] socket reconnected, refreshing data');
+    loadConversations().catchError((_) {});
   }
 
   void _onNewMessage(dynamic data) {
@@ -616,6 +632,57 @@ class ChatProvider extends ChangeNotifier {
       final bTime = DateTime.tryParse(b['updatedAt']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
       return bTime.compareTo(aTime);
     });
+    _updateAppBadge();
+  }
+
+  /// 更新桌面图标上的未读消息数量红点 (iOS)
+  void _updateAppBadge() {
+    int total = 0;
+    for (final conv in _conversations) {
+      final unread = conv['unreadCount'];
+      if (unread is int) total += unread;
+    }
+    try {
+      if (Platform.isIOS) {
+        final plugin = FlutterLocalNotificationsPlugin();
+        plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+            ?.requestPermissions(badge: true)
+            .then((_) {
+          // iOS 通过通知 badge 设置角标
+          if (total > 0) {
+            plugin.show(
+              99999,
+              null,
+              null,
+              NotificationDetails(
+                iOS: DarwinNotificationDetails(
+                  presentBadge: true,
+                  badgeNumber: total,
+                  presentAlert: false,
+                  presentSound: false,
+                ),
+              ),
+            );
+          } else {
+            // 清除角标
+            plugin.show(
+              99999,
+              null,
+              null,
+              const NotificationDetails(
+                iOS: DarwinNotificationDetails(
+                  presentBadge: true,
+                  badgeNumber: 0,
+                  presentAlert: false,
+                  presentSound: false,
+                ),
+              ),
+            );
+            plugin.cancel(99999);
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   String getConvDisplayName(Map<String, dynamic> conv) {

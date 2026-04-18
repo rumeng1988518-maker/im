@@ -130,6 +130,7 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   bool _acting = false;
   bool _kickHandled = false;
   bool _ringing = false;
+  DateTime? _lastPaused;
 
   @override
   void initState() {
@@ -212,8 +213,10 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   }
 
   @override
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _lastPaused = DateTime.now();
       // 进入后台：开启 wakelock 防止休眠断连，显示持久通知
       WakelockPlus.enable();
       NotificationService().showKeepAliveNotification();
@@ -221,7 +224,29 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       // 回到前台：关闭 wakelock，取消持久通知
       WakelockPlus.disable();
       NotificationService().cancelKeepAliveNotification();
+      // 恢复 WebSocket 连接并刷新数据
+      _reconnectAndRefresh();
     }
+  }
+
+  void _reconnectAndRefresh() {
+    try {
+      final auth = context.read<AuthService>();
+      if (!auth.isLoggedIn) return;
+      final token = auth.token;
+      if (token == null) return;
+
+      // 确保 WebSocket 连接
+      final socket = context.read<SocketService>();
+      socket.ensureConnected(token);
+
+      // 如果后台超过 3 秒，主动刷新数据（弥补可能丢失的推送）
+      final paused = _lastPaused;
+      if (paused != null && DateTime.now().difference(paused).inSeconds > 3) {
+        context.read<ChatProvider>().loadConversations().catchError((_) {});
+        context.read<ContactsProvider>().loadFriends().catchError((_) {});
+      }
+    } catch (_) {}
   }
 
   Future<void> _accept(CallProvider callProvider) async {
