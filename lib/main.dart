@@ -18,9 +18,20 @@ import 'package:im_client/services/foreground_service.dart';
 import 'package:im_client/utils/notification_sound.dart';
 import 'package:im_client/services/push_token_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:firebase_core/firebase_core.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Initialize Firebase for Android FCM
+  if (!kIsWeb && Platform.isAndroid) {
+    try {
+      await Firebase.initializeApp();
+    } catch (e) {
+      debugPrint('[Firebase] init error: $e');
+    }
+  }
   await NotificationService().init();
   await ForegroundService.init();
   final auth = AuthService();
@@ -73,8 +84,12 @@ class _IMAppState extends State<IMApp> {
       context.read<ContactsProvider>().loadFriendRequests().catchError((_) {});
       // 首次登录请求忽略电池优化
       ForegroundService.requestBatteryOptimization();
-      // 上报 APNs push token（iOS only）
+      // 上报 push token（iOS APNs / Android FCM）
       _uploadPushToken();
+      // 监听 FCM token 刷新
+      PushTokenService.onTokenRefresh((newToken) {
+        _uploadPushTokenWithValue(newToken);
+      });
     }
   }
 
@@ -82,22 +97,29 @@ class _IMAppState extends State<IMApp> {
     try {
       final pushToken = await PushTokenService.getToken();
       if (pushToken != null && pushToken.isNotEmpty) {
-        // Use a stable device identifier from shared_preferences
-        final prefs = await SharedPreferences.getInstance();
-        String? deviceId = prefs.getString('im_device_id');
-        if (deviceId == null || deviceId.isEmpty) {
-          deviceId = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-          await prefs.setString('im_device_id', deviceId);
-        }
-        await _apiClient.put('/users/me/push-token', data: {
-          'pushToken': pushToken,
-          'deviceId': deviceId,
-          'platform': 'ios',
-        });
-        debugPrint('[APNs] Push token uploaded: ${pushToken.substring(0, 8)}...');
+        await _uploadPushTokenWithValue(pushToken);
       }
     } catch (e) {
-      debugPrint('[APNs] Upload push token error: $e');
+      debugPrint('[Push] Upload push token error: $e');
+    }
+  }
+
+  Future<void> _uploadPushTokenWithValue(String pushToken) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String? deviceId = prefs.getString('im_device_id');
+      if (deviceId == null || deviceId.isEmpty) {
+        deviceId = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+        await prefs.setString('im_device_id', deviceId);
+      }
+      await _apiClient.put('/users/me/push-token', data: {
+        'pushToken': pushToken,
+        'deviceId': deviceId,
+        'platform': PushTokenService.platform,
+      });
+      debugPrint('[Push] Token uploaded (${PushTokenService.platform}): ${pushToken.substring(0, 8)}...');
+    } catch (e) {
+      debugPrint('[Push] Upload error: $e');
     }
   }
 
