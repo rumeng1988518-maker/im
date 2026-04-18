@@ -11,6 +11,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:video_thumbnail/video_thumbnail.dart' as vt;
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
@@ -2312,23 +2313,26 @@ class _ChatPageState extends State<ChatPage> {
           color: const Color(0xFF1F1F1F),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Stack(
-          children: [
-            const Center(
-              child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 40),
-            ),
-            Positioned(
-              left: 10,
-              right: 10,
-              bottom: 8,
-              child: Text(
-                name,
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // 视频缩略图
+              _VideoThumbnail(videoUrl: url),
+              // 播放按钮（半透明遮罩）
+              Center(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black38,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(4),
+                  child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -3011,22 +3015,49 @@ class _VideoPreviewPage extends StatefulWidget {
 class _VideoPreviewPageState extends State<_VideoPreviewPage> {
   VideoPlayerController? _controller;
   bool _hasError = false;
+  String _errorDetail = '';
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    try {
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(widget.videoUrl),
+        httpHeaders: const {'Accept': '*/*'},
+      );
+      _controller = controller;
+      await controller.initialize();
+      if (!mounted) return;
+      controller.addListener(() {
         if (mounted) setState(() {});
-      }).catchError((e) {
-        if (mounted) setState(() => _hasError = true);
       });
+      setState(() {});
+      controller.play();
+    } catch (e) {
+      debugPrint('[VideoPreview] init error: $e');
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorDetail = e.toString();
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
     _controller?.dispose();
     super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
   }
 
   @override
@@ -3053,41 +3084,304 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
       ),
       body: Center(
         child: _hasError
-            ? const Column(
+            ? Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error_outline, color: Colors.white54, size: 48),
-                  SizedBox(height: 12),
-                  Text('视频加载失败', style: TextStyle(color: Colors.white54, fontSize: 15)),
+                  const Icon(Icons.error_outline, color: Colors.white54, size: 48),
+                  const SizedBox(height: 12),
+                  const Text('视频加载失败', style: TextStyle(color: Colors.white54, fontSize: 15)),
+                  if (_errorDetail.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(_errorDetail, style: const TextStyle(color: Colors.white24, fontSize: 11), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() { _hasError = false; _errorDetail = ''; });
+                      _controller?.dispose();
+                      _initPlayer();
+                    },
+                    icon: const Icon(Icons.refresh, color: Colors.white70),
+                    label: const Text('重试', style: TextStyle(color: Colors.white70)),
+                  ),
                 ],
               )
             : (controller != null && controller.value.isInitialized)
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      AspectRatio(
-                        aspectRatio: controller.value.aspectRatio,
-                        child: VideoPlayer(controller),
+                      Expanded(
+                        child: Center(
+                          child: AspectRatio(
+                            aspectRatio: controller.value.aspectRatio,
+                            child: VideoPlayer(controller),
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      IconButton(
-                        iconSize: 42,
-                        color: Colors.white,
-                        icon: Icon(controller.value.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill),
-                        onPressed: () {
-                          setState(() {
-                            if (controller.value.isPlaying) {
-                              controller.pause();
-                            } else {
-                              controller.play();
-                            }
-                          });
-                        },
+                      // 进度条 + 控制
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        child: Column(
+                          children: [
+                            VideoProgressIndicator(controller, allowScrubbing: true,
+                              colors: const VideoProgressColors(
+                                playedColor: Colors.white,
+                                bufferedColor: Colors.white24,
+                                backgroundColor: Colors.white12,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _formatDuration(controller.value.position),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                                const Spacer(),
+                                IconButton(
+                                  iconSize: 42,
+                                  color: Colors.white,
+                                  icon: Icon(controller.value.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill),
+                                  onPressed: () {
+                                    if (controller.value.isPlaying) {
+                                      controller.pause();
+                                    } else {
+                                      controller.play();
+                                    }
+                                  },
+                                ),
+                                const Spacer(),
+                                Text(
+                                  _formatDuration(controller.value.duration),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   )
                 : const CircularProgressIndicator(color: Colors.white),
       ),
+    );
+  }
+}
+
+/// 视频缩略图组件：从网络视频 URL 获取首帧
+class _VideoThumbnail extends StatefulWidget {
+  final String videoUrl;
+  const _VideoThumbnail({required this.videoUrl});
+
+  @override
+  State<_VideoThumbnail> createState() => _VideoThumbnailState();
+}
+
+class _VideoThumbnailState extends State<_VideoThumbnail> {
+  Uint8List? _thumb;
+  bool _failed = false;
+
+  // 全局缓存避免重复生成
+  static final Map<String, Uint8List> _cache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (widget.videoUrl.isEmpty) {
+      if (mounted) setState(() => _failed = true);
+      return;
+    }
+    final cached = _cache[widget.videoUrl];
+    if (cached != null) {
+      if (mounted) setState(() => _thumb = cached);
+      return;
+    }
+    try {
+      final data = await vt.VideoThumbnail.thumbnailData(
+        video: widget.videoUrl,
+        imageFormat: vt.ImageFormat.JPEG,
+        maxWidth: 440,
+        quality: 50,
+      );
+      if (data != null && data.isNotEmpty) {
+        _cache[widget.videoUrl] = data;
+        if (mounted) setState(() => _thumb = data);
+      } else {
+        if (mounted) setState(() => _failed = true);
+      }
+    } catch (e) {
+      debugPrint('[VideoThumbnail] error: $e');
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_thumb != null) {
+      return Image.memory(_thumb!, fit: BoxFit.cover, width: double.infinity, height: double.infinity);
+    }
+    if (_failed) {
+      return Container(
+        color: const Color(0xFF1F1F1F),
+        child: const Center(child: Icon(Icons.videocam, color: Colors.white38, size: 36)),
+      );
+    }
+    return Container(
+      color: const Color(0xFF1F1F1F),
+      child: const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white38))              const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(_errorDetail, style: const TextStyle(color: Colors.white24, fontSize: 11), textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() { _hasError = false; _errorDetail = ''; });
+                      _controller?.dispose();
+                      _initPlayer();
+                    },
+                    icon: const Icon(Icons.refresh, color: Colors.white70),
+                    label: const Text('重试', style: TextStyle(color: Colors.white70)),
+                  ),
+                ],
+              )
+            : (controller != null && controller.value.isInitialized)
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Center(
+                          child: AspectRatio(
+                            aspectRatio: controller.value.aspectRatio,
+                            child: VideoPlayer(controller),
+                          ),
+                        ),
+                      ),
+                      // 进度条 + 控制
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        child: Column(
+                          children: [
+                            VideoProgressIndicator(controller, allowScrubbing: true,
+                              colors: const VideoProgressColors(
+                                playedColor: Colors.white,
+                                bufferedColor: Colors.white24,
+                                backgroundColor: Colors.white12,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _formatDuration(controller.value.position),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                                const Spacer(),
+                                IconButton(
+                                  iconSize: 42,
+                                  color: Colors.white,
+                                  icon: Icon(controller.value.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill),
+                                  onPressed: () {
+                                    if (controller.value.isPlaying) {
+                                      controller.pause();
+                                    } else {
+                                      controller.play();
+                                    }
+                                  },
+                                ),
+                                const Spacer(),
+                                Text(
+                                  _formatDuration(controller.value.duration),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : const CircularProgressIndicator(color: Colors.white),
+      ),
+    );
+  }
+}
+
+/// 视频缩略图组件：从网络视频 URL 获取首帧
+class _VideoThumbnail extends StatefulWidget {
+  final String videoUrl;
+  const _VideoThumbnail({required this.videoUrl});
+
+  @override
+  State<_VideoThumbnail> createState() => _VideoThumbnailState();
+}
+
+class _VideoThumbnailState extends State<_VideoThumbnail> {
+  Uint8List? _thumb;
+  bool _failed = false;
+
+  // 全局缓存避免重复生成
+  static final Map<String, Uint8List> _cache = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (widget.videoUrl.isEmpty) {
+      if (mounted) setState(() => _failed = true);
+      return;
+    }
+    final cached = _cache[widget.videoUrl];
+    if (cached != null) {
+      if (mounted) setState(() => _thumb = cached);
+      return;
+    }
+    try {
+      final data = await vt.VideoThumbnail.thumbnailData(
+        video: widget.videoUrl,
+        imageFormat: vt.ImageFormat.JPEG,
+        maxWidth: 440,
+        quality: 50,
+      );
+      if (data != null && data.isNotEmpty) {
+        _cache[widget.videoUrl] = data;
+        if (mounted) setState(() => _thumb = data);
+      } else {
+        if (mounted) setState(() => _failed = true);
+      }
+    } catch (e) {
+      debugPrint('[VideoThumbnail] error: $e');
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_thumb != null) {
+      return Image.memory(_thumb!, fit: BoxFit.cover, width: double.infinity, height: double.infinity);
+    }
+    if (_failed) {
+      return Container(
+        color: const Color(0xFF1F1F1F),
+        child: const Center(child: Icon(Icons.videocam, color: Colors.white38, size: 36)),
+      );
+    }
+    return Container(
+      color: const Color(0xFF1F1F1F),
+      child: const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white38))),
     );
   }
 }
