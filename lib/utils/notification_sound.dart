@@ -12,11 +12,11 @@ class NotificationSound {
   static AudioPlayer? _ringtonePlayer;
   static BytesSource? _cachedSource;
   static BytesSource? _cachedRingtone;
-  static bool _contextSet = false;
 
   /// 配置音频播放器使用通知音频流（确保即使媒体音量为0也能发声）
   static Future<void> _ensureAudioContext(AudioPlayer player) async {
-    if (kIsWeb || _contextSet) return;
+    if (kIsWeb) return;
+    // 每次都重新设置，防止被其他播放器覆盖
     try {
       if (Platform.isAndroid) {
         await player.setAudioContext(AudioContext(
@@ -29,17 +29,17 @@ class NotificationSound {
           ),
         ));
       } else if (Platform.isIOS) {
-        // iOS: 使用 ambient 模式并与其他音频混合，避免中断静音保活
+        // iOS: 使用 playback + mixWithOthers，与保活静音播放器保持一致
+        // 如果用 ambient 会覆盖保活的 playback 会话，导致 App 被系统挂起
         await player.setAudioContext(AudioContext(
           iOS: AudioContextIOS(
-            category: AVAudioSessionCategory.ambient,
+            category: AVAudioSessionCategory.playback,
             options: {
               AVAudioSessionOptions.mixWithOthers,
             },
           ),
         ));
       }
-      _contextSet = true;
     } catch (_) {}
   }
 
@@ -77,20 +77,26 @@ class NotificationSound {
   static bool _playing = false;
 
   static Future<void> _playNativeSound() async {
-    if (_playing) return; // 防止重入：上一次还没播完
+    // 如果上一次还在播放，直接中断它再重新播放（不跳过）
+    if (_playing) {
+      try { await _player?.stop(); } catch (_) {}
+    }
     _playing = true;
     try {
       _player ??= AudioPlayer();
       await _ensureAudioContext(_player!);
-      await _player!.setReleaseMode(ReleaseMode.stop); // 防止播放完释放资源
+      await _player!.setReleaseMode(ReleaseMode.stop);
       _cachedSource ??= BytesSource(_generateNotificationWav());
       await _player!.stop();
       await _player!.setVolume(1.0);
       await _player!.play(_cachedSource!);
-      // 等待声音播放完成（约0.5s），避免快速消息交错
-      await Future.delayed(const Duration(milliseconds: 600));
-    } catch (_) {} finally {
-      _playing = false;
+    } catch (_) {
+      // 播放失败：销毁播放器，下次重新创建
+      try { await _player?.dispose(); } catch (_) {}
+      _player = null;
+    } finally {
+      // 短暂延迟后解锁，防止极高频率重入导致音频驱动过载
+      Future.delayed(const Duration(milliseconds: 300), () { _playing = false; });
     }
   }
 

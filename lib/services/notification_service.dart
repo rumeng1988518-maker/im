@@ -14,6 +14,8 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
   int _notificationId = 0;
+  // 跟踪每个会话的活跃通知 ID，用于进入会话时取消
+  final Map<String, List<int>> _convNotificationIds = {};
 
   Future<void> init() async {
     if (_initialized || kIsWeb) return;
@@ -80,11 +82,18 @@ class NotificationService {
     await _plugin.cancel(keepAliveNotificationId);
   }
 
-  /// 根据 conversationId 生成稳定的通知 ID（同一会话复用同一 ID，方便取消）
-  int _convNotificationId(String? conversationId) {
-    if (conversationId == null || conversationId.isEmpty) return _notificationId++;
-    // 保持在安全正整数范围内，避开保留 ID
-    return (conversationId.hashCode.abs() % 80000) + 10000;
+  /// 每条消息都用新的递增 ID，确保国产 ROM 每次都弹出通知
+  int _nextConvNotificationId(String? conversationId) {
+    final id = _notificationId++;
+    // 避开保留 ID 区间
+    if (id == _callNotificationId || id == _badgeNotificationId || id == keepAliveNotificationId) {
+      return _nextConvNotificationId(conversationId);
+    }
+    if (conversationId != null && conversationId.isNotEmpty) {
+      _convNotificationIds.putIfAbsent(conversationId, () => []);
+      _convNotificationIds[conversationId]!.add(id);
+    }
+    return id;
   }
 
   Future<void> showMessageNotification({
@@ -114,7 +123,7 @@ class NotificationService {
     );
 
     await _plugin.show(
-      _convNotificationId(conversationId),
+      _nextConvNotificationId(conversationId),
       senderName,
       body,
       details,
@@ -122,10 +131,15 @@ class NotificationService {
     );
   }
 
-  /// 取消指定会话的通知（用户进入会话时调用）
+  /// 取消指定会话的所有通知（用户进入会话时调用）
   Future<void> cancelConversationNotification(String conversationId) async {
     if (!_initialized) return;
-    await _plugin.cancel(_convNotificationId(conversationId));
+    final ids = _convNotificationIds.remove(conversationId);
+    if (ids != null) {
+      for (final id in ids) {
+        await _plugin.cancel(id);
+      }
+    }
   }
 
   Future<void> showFriendRequestNotification({
