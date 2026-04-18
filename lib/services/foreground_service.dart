@@ -1,20 +1,14 @@
-import 'dart:io';
+锘縤mport 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:audioplayers/audioplayers.dart';
 
-/// 后台保活服务
-/// - Android: 前台 Service（真正的 ForegroundService）
-/// - iOS: 静音音频循环播放（利用 audio background mode 阻止进程挂起）
 class ForegroundService {
   static bool _initialized = false;
-
-  // ── iOS 静音音频 ──
   static AudioPlayer? _silentPlayer;
   static BytesSource? _silentSource;
 
-  /// 初始化（在 main() 中调用一次）
   static Future<void> init() async {
     if (kIsWeb) return;
     if (_initialized) return;
@@ -24,8 +18,8 @@ class ForegroundService {
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
           channelId: 'im_foreground',
-          channelName: '后台运行',
-          channelDescription: '保持消息连接',
+          channelName: 'Background Service',
+          channelDescription: 'Keep message connection alive',
           channelImportance: NotificationChannelImportance.LOW,
           priority: NotificationPriority.LOW,
         ),
@@ -43,7 +37,6 @@ class ForegroundService {
     }
   }
 
-  /// 启动保活（App 进入后台时调用）
   static Future<void> start() async {
     if (kIsWeb) return;
 
@@ -52,8 +45,8 @@ class ForegroundService {
         if (await FlutterForegroundTask.isRunningService) return;
         await FlutterForegroundTask.startService(
           serviceId: 256,
-          notificationTitle: '内部通',
-          notificationText: '正在后台保持连接',
+          notificationTitle: 'IM',
+          notificationText: 'Keeping connection alive',
           callback: _startCallback,
         );
         debugPrint('[ForegroundService] Android service started');
@@ -65,7 +58,6 @@ class ForegroundService {
     }
   }
 
-  /// 停止保活（App 回到前台时调用）
   static Future<void> stop() async {
     if (kIsWeb) return;
 
@@ -81,7 +73,6 @@ class ForegroundService {
     }
   }
 
-  /// 请求忽略电池优化（仅 Android）
   static Future<void> requestBatteryOptimization() async {
     if (kIsWeb || !Platform.isAndroid) return;
     try {
@@ -94,8 +85,6 @@ class ForegroundService {
       debugPrint('[ForegroundService] battery opt error: $e');
     }
   }
-
-  // ── iOS 静音音频保活 ──
 
   static Future<void> _startSilentAudio() async {
     if (_silentPlayer != null) return;
@@ -129,7 +118,6 @@ class ForegroundService {
     debugPrint('[ForegroundService] iOS silent audio stopped');
   }
 
-  /// 生成 1 秒静音 WAV（16-bit mono 8kHz）
   static Uint8List _generateSilentWav() {
     const sampleRate = 8000;
     const duration = 1;
