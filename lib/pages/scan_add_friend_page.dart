@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
@@ -15,6 +16,7 @@ class ScanAddFriendPage extends StatefulWidget {
 
 class _ScanAddFriendPageState extends State<ScanAddFriendPage> {
   late MobileScannerController _controller;
+  StreamSubscription<BarcodeCapture>? _barcodeSub;
   bool _processing = false;
   bool _cameraError = false;
 
@@ -25,10 +27,36 @@ class _ScanAddFriendPageState extends State<ScanAddFriendPage> {
       detectionSpeed: DetectionSpeed.noDuplicates,
       facing: CameraFacing.back,
     );
+    // 监听扫描结果（mobile_scanner 7.x API）
+    _barcodeSub = _controller.barcodes.listen(_onDetect);
+    // 监听控制器状态以检测相机错误
+    _controller.addListener(_onControllerChanged);
+    // 启动相机
+    _controller.start();
+  }
+
+  void _onControllerChanged() {
+    final value = _controller.value;
+    if (value.error != null && !_cameraError && mounted) {
+      setState(() => _cameraError = true);
+    }
+  }
+
+  void _onDetect(BarcodeCapture capture) async {
+    if (_processing) return;
+    final raw = capture.barcodes
+        .map((b) => b.rawValue)
+        .whereType<String>()
+        .map((e) => e.trim())
+        .firstWhere((e) => e.isNotEmpty, orElse: () => '');
+    if (raw.isEmpty) return;
+    await _processKeyword(_extractKeyword(raw), fromScanner: true);
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerChanged);
+    _barcodeSub?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -230,22 +258,6 @@ class _ScanAddFriendPageState extends State<ScanAddFriendPage> {
           else
             MobileScanner(
               controller: _controller,
-              errorBuilder: (context, error, child) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted && !_cameraError) setState(() => _cameraError = true);
-                });
-                return const SizedBox();
-              },
-              onDetect: (capture) async {
-                if (_processing) return;
-                final raw = capture.barcodes
-                    .map((b) => b.rawValue)
-                    .whereType<String>()
-                    .map((e) => e.trim())
-                    .firstWhere((e) => e.isNotEmpty, orElse: () => '');
-                if (raw.isEmpty) return;
-                await _processKeyword(_extractKeyword(raw), fromScanner: true);
-              },
             ),
           if (!_cameraError) ...[
             IgnorePointer(
