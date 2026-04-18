@@ -80,6 +80,13 @@ class NotificationService {
     await _plugin.cancel(keepAliveNotificationId);
   }
 
+  /// 根据 conversationId 生成稳定的通知 ID（同一会话复用同一 ID，方便取消）
+  int _convNotificationId(String? conversationId) {
+    if (conversationId == null || conversationId.isEmpty) return _notificationId++;
+    // 保持在安全正整数范围内，避开保留 ID
+    return (conversationId.hashCode.abs() % 80000) + 10000;
+  }
+
   Future<void> showMessageNotification({
     required String senderName,
     required String body,
@@ -107,12 +114,18 @@ class NotificationService {
     );
 
     await _plugin.show(
-      _notificationId++,
+      _convNotificationId(conversationId),
       senderName,
       body,
       details,
       payload: conversationId,
     );
+  }
+
+  /// 取消指定会话的通知（用户进入会话时调用）
+  Future<void> cancelConversationNotification(String conversationId) async {
+    if (!_initialized) return;
+    await _plugin.cancel(_convNotificationId(conversationId));
   }
 
   Future<void> showFriendRequestNotification({
@@ -232,11 +245,21 @@ class NotificationService {
     }
   }
 
-  /// 清除桌面图标角标
+  /// 清除桌面图标角标及所有消息通知
   Future<void> clearBadge() async {
     if (!_initialized) return;
     try {
-      await _plugin.cancel(_badgeNotificationId);
+      // 取消角标通知和所有消息通知（保留 keepAlive 和 call 通知）
+      // cancelAll 会清除所有通知，之后重新显示 keepAlive（如有需要）
+      final activeNotifications = await _plugin.getActiveNotifications();
+      for (final n in activeNotifications) {
+        final id = n.id;
+        if (id == null) continue;
+        // 保留 keepAlive 和 call 通知
+        if (id == keepAliveNotificationId || id == _callNotificationId) continue;
+        await _plugin.cancel(id);
+      }
+
       // iOS 额外清除角标
       final iosPlugin = _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
       if (iosPlugin != null) {

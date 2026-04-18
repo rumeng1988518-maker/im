@@ -55,6 +55,14 @@ class ChatProvider extends ChangeNotifier {
 
   void setCurrentConv(String? id) {
     _currentConvId = id;
+    // 进入会话时：清除该会话的通知栏通知，并刷新角标
+    if (id != null) {
+      NotificationService().cancelConversationNotification(id);
+      // 延迟一点刷新角标（等 markRead 完成）
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _updateAppBadge();
+      });
+    }
     notifyListeners();
   }
 
