@@ -99,6 +99,15 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   @override
+  void deactivate() {
+    // 页面离开时立即清除当前会话标记，避免新消息被自动标记已读
+    try {
+      context.read<ChatProvider>().setCurrentConv(null);
+    } catch (_) {}
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _typingStopTimer?.cancel();
     _recordTimer?.cancel();
@@ -110,9 +119,6 @@ class _ChatPageState extends State<ChatPage> {
     _stopTyping(force: true);
     _inputController.dispose();
     _scrollController.dispose();
-    try {
-      context.read<ChatProvider>().setCurrentConv(null);
-    } catch (_) {}
     super.dispose();
   }
 
