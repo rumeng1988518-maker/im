@@ -6,6 +6,7 @@ import 'package:im_client/services/auth_service.dart';
 import 'package:im_client/services/socket_service.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
+import 'package:im_client/pages/landing_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -229,7 +230,10 @@ class _SettingsPageState extends State<SettingsPage> {
               await context.read<AuthService>().logout();
               if (context.mounted) {
                 AppToast.show(context, '已退出登录');
-                Navigator.of(context).popUntil((route) => route.isFirst);
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LandingPage()),
+                  (_) => false,
+                );
               }
             },
             style: TextButton.styleFrom(foregroundColor: AppColors.danger),

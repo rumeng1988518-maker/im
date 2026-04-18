@@ -29,7 +29,13 @@ class ApiClient {
         if (data is Map) {
           final code = data['code'];
           if (code == 40101 || code == 40102 || code == 40103) {
-            _auth.logout();
+            // 仅当请求携带的 token 与当前 token 一致时才清除登录态
+            // 防止旧会话的过期响应清除新 token
+            final reqToken = response.requestOptions.headers['Authorization'];
+            final curToken = _auth.token;
+            if (curToken == null || reqToken == 'Bearer $curToken') {
+              _auth.logout();
+            }
             handler.reject(DioException(
               requestOptions: response.requestOptions,
               response: response,
@@ -55,7 +61,11 @@ class ApiClient {
         if (body is Map) {
           final code = body['code'];
           if (code == 40101 || code == 40102 || code == 40103) {
-            _auth.logout();
+            final reqToken = error.requestOptions.headers['Authorization'];
+            final curToken = _auth.token;
+            if (curToken == null || reqToken == 'Bearer $curToken') {
+              _auth.logout();
+            }
           }
         }
 

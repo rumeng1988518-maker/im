@@ -101,6 +101,13 @@ class _IMAppState extends State<IMApp> {
             // 已退出登录，重置标记以便下次登录时重新连接
             _initialized = false;
             _socketService.disconnect();
+            // 清除旧会话数据，避免重新登录时显示上一个账号的数据
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              try {
+                context.read<ChatProvider>().clearAll();
+                context.read<ContactsProvider>().clearAll();
+              } catch (_) {}
+            });
             return const LandingPage();
           },
         ),
@@ -136,7 +143,13 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
     try {
       final socket = context.read<SocketService>();
       socket.on('auth:kicked', _onKicked);
+      // 重新连接时重置踢下线标记，以便再次被踢时能正常处理
+      socket.on('connect', _onSocketConnect);
     } catch (_) {}
+  }
+
+  void _onSocketConnect(dynamic _) {
+    _kickHandled = false;
   }
 
   void _onKicked(dynamic data) async {
@@ -148,7 +161,6 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
     // 断开 socket 并清除登录态
     try {
       final socket = context.read<SocketService>();
-      socket.off('auth:kicked');
       socket.disconnect();
     } catch (_) {}
 
@@ -157,7 +169,7 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       await auth.logout();
     } catch (_) {}
 
-    // 跳转到登录页并提示
+    // auth.logout() 触发 Consumer 重建，同时显式导航到 LandingPage 确保界面切换
     final nav = IMApp.navigatorKey.currentState;
     if (nav != null) {
       nav.pushAndRemoveUntil(
@@ -190,7 +202,9 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     try {
-      context.read<SocketService>().off('auth:kicked');
+      final socket = context.read<SocketService>();
+      socket.off('auth:kicked');
+      socket.off('connect', _onSocketConnect);
     } catch (_) {}
     super.dispose();
   }

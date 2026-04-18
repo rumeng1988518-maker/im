@@ -7,6 +7,7 @@ import 'package:im_client/pages/register_page.dart';
 import 'package:im_client/pages/forgot_password_page.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
+import 'package:im_client/pages/home_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -55,8 +56,11 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
       AppToast.show(context, '登录成功');
-      // Pop all auth pages back to root
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      // 显式导航到主页，不依赖 Consumer 重建时序
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomePage()),
+        (_) => false,
+      );
     } catch (e) {
       if (mounted) {
         AppToast.show(context, ErrorMessage.from(e, fallback: '登录失败，请检查账号或密码'));

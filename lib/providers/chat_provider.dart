@@ -37,6 +37,19 @@ class ChatProvider extends ChangeNotifier {
   bool get loading => _loading;
   bool isPeerTyping(String convId) => _peerTyping[convId] == true;
 
+  void clearAll() {
+    _conversations = [];
+    _messages.clear();
+    _peerTyping.clear();
+    for (final t in _typingTimers.values) {
+      t.cancel();
+    }
+    _typingTimers.clear();
+    _currentConvId = null;
+    _loading = false;
+    notifyListeners();
+  }
+
   void setCurrentConv(String? id) {
     _currentConvId = id;
     notifyListeners();

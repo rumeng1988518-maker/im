@@ -18,6 +18,14 @@ class ContactsProvider extends ChangeNotifier {
     socket.on('friend:request-rejected', _onFriendRequestRejected);
   }
 
+  void clearAll() {
+    _friends = [];
+    _friendRequests = [];
+    _loading = false;
+    _pendingRequestCount = 0;
+    notifyListeners();
+  }
+
   List<Map<String, dynamic>> get friends => _friends;
   List<Map<String, dynamic>> get friendRequests => _friendRequests;
   bool get loading => _loading;
