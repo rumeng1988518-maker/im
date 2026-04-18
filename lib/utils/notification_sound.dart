@@ -28,6 +28,16 @@ class NotificationSound {
             audioFocus: AndroidAudioFocus.gainTransientMayDuck,
           ),
         ));
+      } else if (Platform.isIOS) {
+        // iOS: 使用 ambient 模式并与其他音频混合，避免中断静音保活
+        await player.setAudioContext(AudioContext(
+          iOS: AudioContextIOS(
+            category: AVAudioSessionCategory.ambient,
+            options: {
+              AVAudioSessionOptions.mixWithOthers,
+            },
+          ),
+        ));
       }
       _contextSet = true;
     } catch (_) {}
@@ -64,15 +74,24 @@ class NotificationSound {
     } catch (_) {}
   }
 
+  static bool _playing = false;
+
   static Future<void> _playNativeSound() async {
+    if (_playing) return; // 防止重入：上一次还没播完
+    _playing = true;
     try {
       _player ??= AudioPlayer();
       await _ensureAudioContext(_player!);
+      await _player!.setReleaseMode(ReleaseMode.stop); // 防止播放完释放资源
       _cachedSource ??= BytesSource(_generateNotificationWav());
       await _player!.stop();
       await _player!.setVolume(1.0);
       await _player!.play(_cachedSource!);
-    } catch (_) {}
+      // 等待声音播放完成（约0.5s），避免快速消息交错
+      await Future.delayed(const Duration(milliseconds: 600));
+    } catch (_) {} finally {
+      _playing = false;
+    }
   }
 
   /// Generate a short "ding-dong" WAV tone (44100Hz, 16-bit mono, ~0.5s)

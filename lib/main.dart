@@ -16,6 +16,7 @@ import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/services/notification_service.dart';
 import 'package:im_client/services/foreground_service.dart';
 import 'package:im_client/utils/notification_sound.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -90,7 +91,7 @@ class _IMAppState extends State<IMApp> {
         title: AppConfig.appName,
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
-        builder: (context, child) => _IncomingCallGate(child: child ?? const SizedBox.shrink()),
+        builder: (context, child) => WillStartForegroundTask(child: _IncomingCallGate(child: child ?? const SizedBox.shrink())),
         home: Consumer<AuthService>(
           builder: (context, auth, _) {
             if (!auth.initialized) {

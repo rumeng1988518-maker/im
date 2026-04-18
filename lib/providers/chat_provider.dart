@@ -17,6 +17,8 @@ class ChatProvider extends ChangeNotifier {
   String? _currentConvId;
   bool _loading = false;
   Timer? _loadDebounce;
+  /// 最近已读的会话 ID（用于 loadConversations 合并时强制清零，防止服务端旧数据覆盖）
+  final Set<String> _recentlyReadConvIds = {};
 
   ChatProvider({required this.api, required this.socket}) {
     socket.on('message:new', _onNewMessage);
@@ -124,6 +126,17 @@ class ChatProvider extends ChangeNotifier {
         if (curIdx >= 0) {
           _conversations[curIdx]['unreadCount'] = 0;
         }
+      }
+      // 最近已读的会话也强制清零（防止离开会话后 debounced load 覆盖回旧值）
+      if (_recentlyReadConvIds.isNotEmpty) {
+        for (final readId in _recentlyReadConvIds) {
+          final ri = _conversations.indexWhere((c) => c['conversationId']?.toString() == readId);
+          if (ri >= 0) {
+            final serverVal = (_conversations[ri]['unreadCount'] as num?)?.toInt() ?? 0;
+            if (serverVal > 0) _conversations[ri]['unreadCount'] = 0;
+          }
+        }
+        _recentlyReadConvIds.clear();
       }
       _sortConversations();
       _loading = false;
@@ -334,6 +347,8 @@ class ChatProvider extends ChangeNotifier {
       _updateAppBadge();
       notifyListeners();
     }
+    // 记录已读会话，防止 loadConversations 用旧数据覆盖
+    _recentlyReadConvIds.add(convId);
 
     socket.emit('message:read', {
       'conversationId': convId,
