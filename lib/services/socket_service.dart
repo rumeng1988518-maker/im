@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:im_client/config/app_config.dart';
@@ -6,18 +7,21 @@ class SocketService {
   io.Socket? _socket;
   String? _token;
   bool _connecting = false;
+  Timer? _heartbeatTimer;
+  int _missedPongs = 0;
+  static const _heartbeatInterval = Duration(seconds: 15);
+  static const _maxMissedPongs = 2;
 
   final Map<String, List<Function(dynamic)>> _listeners = {};
 
   bool get isConnected => _socket?.connected ?? false;
   bool get isConnecting => _connecting;
 
-  /// Force reconnect even if already connected (used on app foreground resume)
+  /// 确保连接存活，如果断线则重新连接
   void ensureConnected(String token) {
-    if (isConnected) return;
     _token = token;
+    if (isConnected) return;
     if (_socket != null && !_connecting) {
-      // Socket exists but disconnected - reconnect
       _socket!.connect();
     } else if (_socket == null) {
       connect(token);
@@ -38,36 +42,47 @@ class SocketService {
         .setAuth({'token': token})
         .enableAutoConnect()
         .enableReconnection()
+        .setReconnectionDelay(1000)
+        .setReconnectionDelayMax(5000)
+        .setReconnectionAttempts(double.infinity.toInt())
         .build();
 
     _socket = io.io(AppConfig.wsUrl, opts);
 
     _socket!.onConnect((_) {
       _connecting = false;
-      debugPrint('WS connected');
+      _missedPongs = 0;
+      debugPrint('[WS] connected');
+      _startHeartbeat();
       _emitLocal('connect', null);
     });
 
     _socket!.onConnectError((err) {
       _connecting = false;
-      debugPrint('WS connect error: $err');
+      debugPrint('[WS] connect error: $err');
       final errStr = err.toString();
-      // Token 无效/过期时停止重连，触发 kicked 流程
       if (errStr.contains('令牌无效') || errStr.contains('已过期') || errStr.contains('认证失败')) {
-        debugPrint('WS auth failed, stopping reconnection');
+        debugPrint('[WS] auth failed, stopping reconnection');
+        _stopHeartbeat();
         _socket?.disconnect();
         _emitLocal('auth:kicked', {'reason': '登录已过期，请重新登录'});
       }
     });
 
     _socket!.onError((err) {
-      debugPrint('WS error: $err');
+      debugPrint('[WS] error: $err');
     });
 
     _socket!.onDisconnect((_) {
       _connecting = false;
-      debugPrint('WS disconnected');
+      debugPrint('[WS] disconnected');
+      _stopHeartbeat();
       _emitLocal('disconnect', null);
+    });
+
+    // 服务端 pong 响应
+    _socket!.on('pong', (_) {
+      _missedPongs = 0;
     });
 
     // Listen for message events
@@ -101,9 +116,43 @@ class SocketService {
 
   void disconnect() {
     _connecting = false;
+    _stopHeartbeat();
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;
+  }
+
+  void _startHeartbeat() {
+    _stopHeartbeat();
+    _missedPongs = 0;
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      if (!isConnected) {
+        debugPrint('[WS] heartbeat: not connected, attempting reconnect');
+        _stopHeartbeat();
+        if (_token != null) {
+          ensureConnected(_token!);
+        }
+        return;
+      }
+      _missedPongs++;
+      if (_missedPongs > _maxMissedPongs) {
+        debugPrint('[WS] heartbeat: missed $_missedPongs pongs, reconnecting');
+        _stopHeartbeat();
+        _socket?.disconnect();
+        if (_token != null) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            ensureConnected(_token!);
+          });
+        }
+        return;
+      }
+      _socket?.emit('ping', null);
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
   }
 
   void on(String event, Function(dynamic) callback) {

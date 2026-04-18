@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/socket_service.dart';
 import 'package:im_client/services/notification_service.dart';
@@ -18,6 +16,7 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, Timer> _typingTimers = {};
   String? _currentConvId;
   bool _loading = false;
+  Timer? _loadDebounce;
 
   ChatProvider({required this.api, required this.socket}) {
     socket.on('message:new', _onNewMessage);
@@ -72,16 +71,46 @@ class ChatProvider extends ChangeNotifier {
     return target['onlineStatus'] == 'online';
   }
 
+  /// 防抖加载会话列表（1.5秒内多次调用只执行最后一次）
+  void _debouncedLoadConversations() {
+    _loadDebounce?.cancel();
+    _loadDebounce = Timer(const Duration(milliseconds: 1500), () {
+      loadConversations().catchError((_) {});
+    });
+  }
+
   Future<void> loadConversations() async {
     try {
       _loading = true;
       notifyListeners();
+
+      // 记录当前本地的未读数，用于在服务端数据较旧时保留本地更高值
+      final localUnread = <String, int>{};
+      for (final c in _conversations) {
+        final id = c['conversationId']?.toString();
+        if (id != null) {
+          localUnread[id] = (c['unreadCount'] as num?)?.toInt() ?? 0;
+        }
+      }
+
       final data = await api.get('/conversations', params: {
         'page': 1,
         'pageSize': 100,
       });
       _conversations = List<Map<String, dynamic>>.from(data?['list'] ?? data ?? []);
-      // 如果用户正在查看某个会话，强制清零该会话的未读数（避免服务端数据覆盖本地已读状态）
+
+      // 合并未读数：取服务端和本地的较大值（防止异步加载覆盖本地实时增量）
+      for (final c in _conversations) {
+        final id = c['conversationId']?.toString();
+        if (id == null) continue;
+        final serverUnread = (c['unreadCount'] as num?)?.toInt() ?? 0;
+        final clientUnread = localUnread[id] ?? 0;
+        if (clientUnread > serverUnread) {
+          c['unreadCount'] = clientUnread;
+        }
+      }
+
+      // 如果用户正在查看某个会话，强制清零该会话的未读数
       if (_currentConvId != null) {
         final curIdx = _conversations.indexWhere((c) => c['conversationId']?.toString() == _currentConvId);
         if (curIdx >= 0) {
@@ -466,7 +495,8 @@ class ChatProvider extends ChangeNotifier {
       }
     }
 
-    loadConversations(); // 后台与服务端同步
+    // 延迟同步服务端数据（避免连续消息导致竞态覆盖本地未读数）
+    _debouncedLoadConversations();
     notifyListeners();
   }
 
@@ -635,7 +665,7 @@ class ChatProvider extends ChangeNotifier {
     _updateAppBadge();
   }
 
-  /// 更新桌面图标上的未读消息数量红点 (iOS)
+  /// 更新桌面图标上的未读消息数量角标 (iOS + Android)
   void _updateAppBadge() {
     int total = 0;
     for (final conv in _conversations) {
@@ -643,44 +673,11 @@ class ChatProvider extends ChangeNotifier {
       if (unread is int) total += unread;
     }
     try {
-      if (Platform.isIOS) {
-        final plugin = FlutterLocalNotificationsPlugin();
-        plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
-            ?.requestPermissions(badge: true)
-            .then((_) {
-          // iOS 通过通知 badge 设置角标
-          if (total > 0) {
-            plugin.show(
-              99999,
-              null,
-              null,
-              NotificationDetails(
-                iOS: DarwinNotificationDetails(
-                  presentBadge: true,
-                  badgeNumber: total,
-                  presentAlert: false,
-                  presentSound: false,
-                ),
-              ),
-            );
-          } else {
-            // 清除角标
-            plugin.show(
-              99999,
-              null,
-              null,
-              const NotificationDetails(
-                iOS: DarwinNotificationDetails(
-                  presentBadge: true,
-                  badgeNumber: 0,
-                  presentAlert: false,
-                  presentSound: false,
-                ),
-              ),
-            );
-            plugin.cancel(99999);
-          }
-        });
+      final ns = NotificationService();
+      if (total > 0) {
+        ns.updateBadge(total);
+      } else {
+        ns.clearBadge();
       }
     } catch (_) {}
   }

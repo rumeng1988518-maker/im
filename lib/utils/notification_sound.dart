@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:math';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -11,6 +12,26 @@ class NotificationSound {
   static AudioPlayer? _ringtonePlayer;
   static BytesSource? _cachedSource;
   static BytesSource? _cachedRingtone;
+  static bool _contextSet = false;
+
+  /// 配置音频播放器使用通知音频流（确保即使媒体音量为0也能发声）
+  static Future<void> _ensureAudioContext(AudioPlayer player) async {
+    if (kIsWeb || _contextSet) return;
+    try {
+      if (Platform.isAndroid) {
+        await player.setAudioContext(AudioContext(
+          android: AudioContextAndroid(
+            isSpeakerphoneOn: false,
+            stayAwake: false,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.notification,
+            audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+          ),
+        ));
+      }
+      _contextSet = true;
+    } catch (_) {}
+  }
 
   static void play() {
     if (kIsWeb) {
@@ -46,20 +67,22 @@ class NotificationSound {
   static Future<void> _playNativeSound() async {
     try {
       _player ??= AudioPlayer();
+      await _ensureAudioContext(_player!);
       _cachedSource ??= BytesSource(_generateNotificationWav());
       await _player!.stop();
+      await _player!.setVolume(1.0);
       await _player!.play(_cachedSource!);
     } catch (_) {}
   }
 
-  /// Generate a short "ding-dong" WAV tone (44100Hz, 16-bit mono, ~0.35s)
+  /// Generate a short "ding-dong" WAV tone (44100Hz, 16-bit mono, ~0.5s)
   static Uint8List _generateNotificationWav() {
     const sampleRate = 44100;
-    const duration1 = 0.15; // "ding" duration
-    const duration2 = 0.20; // "dong" duration
+    const duration1 = 0.20; // "ding" duration
+    const duration2 = 0.30; // "dong" duration
     const freq1 = 880.0;   // "ding" frequency (A5)
     const freq2 = 587.0;   // "dong" frequency (D5)
-    const volume = 0.3;
+    const volume = 0.8;    // 高音量确保可听
 
     final totalSamples = ((duration1 + duration2) * sampleRate).toInt();
     final samples = Int16List(totalSamples);
@@ -69,11 +92,11 @@ class NotificationSound {
       final t = i / sampleRate;
       double sample;
       if (i < samplesD1) {
-        final env = volume * exp(-t * 20);
+        final env = volume * exp(-t * 8); // 减缓衰减
         sample = env * sin(2 * pi * freq1 * t);
       } else {
         final t2 = (i - samplesD1) / sampleRate;
-        final env = volume * exp(-t2 * 15);
+        final env = volume * exp(-t2 * 6); // 减缓衰减
         sample = env * sin(2 * pi * freq2 * t2);
       }
       samples[i] = (sample * 32767).clamp(-32768, 32767).toInt();

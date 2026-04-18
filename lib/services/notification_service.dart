@@ -3,6 +3,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// 来电通知固定 ID，方便取消
 const int _callNotificationId = 99999;
+/// 角标通知固定 ID
+const int _badgeNotificationId = 99998;
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._();
@@ -191,5 +193,70 @@ class NotificationService {
   Future<void> cancelCallNotification() async {
     if (!_initialized) return;
     await _plugin.cancel(_callNotificationId);
+  }
+
+  /// 更新桌面图标角标数字
+  Future<void> updateBadge(int count) async {
+    if (!_initialized) return;
+    try {
+      // Android: 通过一条静默通知的 number 属性设置角标数字
+      // 大多数 Android 启动器（Samsung/Xiaomi/Huawei/OPPO）会读取 number 显示角标
+      final androidDetails = AndroidNotificationDetails(
+        'im_badge',
+        '未读消息角标',
+        channelDescription: '用于显示桌面图标未读数量',
+        importance: Importance.min,
+        priority: Priority.min,
+        number: count,
+        showWhen: false,
+        playSound: false,
+        enableVibration: false,
+        ongoing: false,
+        onlyAlertOnce: true,
+        // 使通知几乎不可见但角标仍然生效
+        visibility: NotificationVisibility.secret,
+      );
+      final iosDetails = DarwinNotificationDetails(
+        presentAlert: false,
+        presentBadge: true,
+        presentSound: false,
+        badgeNumber: count,
+      );
+      final details = NotificationDetails(
+        android: androidDetails,
+        iOS: iosDetails,
+      );
+      await _plugin.show(_badgeNotificationId, '', '', details);
+    } catch (e) {
+      debugPrint('[NotificationService] updateBadge error: $e');
+    }
+  }
+
+  /// 清除桌面图标角标
+  Future<void> clearBadge() async {
+    if (!_initialized) return;
+    try {
+      await _plugin.cancel(_badgeNotificationId);
+      // iOS 额外清除角标
+      final iosPlugin = _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+      if (iosPlugin != null) {
+        await _plugin.show(
+          _badgeNotificationId,
+          null,
+          null,
+          const NotificationDetails(
+            iOS: DarwinNotificationDetails(
+              presentAlert: false,
+              presentBadge: true,
+              presentSound: false,
+              badgeNumber: 0,
+            ),
+          ),
+        );
+        await _plugin.cancel(_badgeNotificationId);
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] clearBadge error: $e');
+    }
   }
 }

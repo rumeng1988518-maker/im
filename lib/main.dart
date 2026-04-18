@@ -213,7 +213,6 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   }
 
   @override
-  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _lastPaused = DateTime.now();
