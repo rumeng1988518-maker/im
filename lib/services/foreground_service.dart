@@ -29,9 +29,12 @@ class ForegroundService {
         ),
         foregroundTaskOptions: ForegroundTaskOptions(
           eventAction: ForegroundTaskEventAction.repeat(15000),
-          autoRunOnBoot: false,
+          autoRunOnBoot: true,
+          autoRunOnMyPackageReplaced: true,
           allowWakeLock: true,
           allowWifiLock: true,
+          allowAutoRestart: true,
+          stopWithTask: false,
         ),
       );
     }
