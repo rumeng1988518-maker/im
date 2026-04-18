@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:im_client/providers/call_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/socket_service.dart';
 import 'package:im_client/utils/app_toast.dart';
@@ -120,6 +121,22 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
   Future<void> _initCall() async {
     try {
+      // 主动请求麦克风权限（视频通话同时请求摄像头权限）
+      if (!kIsWeb) {
+        final permissions = [Permission.microphone];
+        if (widget.callType == 'video') {
+          permissions.add(Permission.camera);
+        }
+        final statuses = await permissions.request();
+        if (statuses[Permission.microphone] != PermissionStatus.granted) {
+          if (mounted) {
+            AppToast.show(context, '需要麦克风权限才能进行通话');
+          }
+          await _safePop();
+          return;
+        }
+      }
+
       await _remoteRenderer.initialize();
       await _localRenderer.initialize();
       await _createPeer();
@@ -258,11 +275,13 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
   Future<void> _openLocalAudio() async {
     final constraints = {
-      'audio': {
-        'echoCancellation': true,
-        'noiseSuppression': true,
-        'autoGainControl': true,
-      },
+      'audio': kIsWeb
+          ? {
+              'echoCancellation': true,
+              'noiseSuppression': true,
+              'autoGainControl': true,
+            }
+          : true, // Android/iOS 使用平台默认音频处理，避免兼容性问题
       'video': false,
     };
     final stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -270,8 +289,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
     for (final track in stream.getAudioTracks()) {
       _audioTrack = track;
+      track.enabled = true; // 确保音频轨道已启用
       await _peer?.addTrack(track, stream);
     }
+    debugPrint('[CallPage] Local audio ready, tracks: ${stream.getAudioTracks().length}');
     if (!_audioReady.isCompleted) _audioReady.complete();
   }
 
@@ -291,16 +312,19 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     if (offer.sdp == null || offer.sdp!.isEmpty) return;
 
     // 优化 SDP：启用 Opus FEC/DTX 提升弱网音频质量
-    final optimizedOffer = RTCSessionDescription(
-      _optimizeSdpForWeakNetwork(offer.sdp!),
-      offer.type,
-    );
+    String finalSdp = offer.sdp!;
+    try {
+      finalSdp = _optimizeSdpForWeakNetwork(finalSdp);
+    } catch (e) {
+      debugPrint('[CallPage] SDP optimization failed, using original: $e');
+    }
+    final optimizedOffer = RTCSessionDescription(finalSdp, offer.type);
     await _peer!.setLocalDescription(optimizedOffer);
     _socket.emit('call:sdp', {
       'callId': widget.callId,
       'targetUserId': widget.peerUserId,
       'sdpType': 'offer',
-      'sdp': optimizedOffer.sdp,
+      'sdp': finalSdp,
     });
 
     if (!mounted) return;
@@ -318,16 +342,19 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     if (answer.sdp == null || answer.sdp!.isEmpty) return;
 
     // 优化 SDP：启用 Opus FEC/DTX 提升弱网音频质量
-    final optimizedAnswer = RTCSessionDescription(
-      _optimizeSdpForWeakNetwork(answer.sdp!),
-      answer.type,
-    );
+    String finalSdp = answer.sdp!;
+    try {
+      finalSdp = _optimizeSdpForWeakNetwork(finalSdp);
+    } catch (e) {
+      debugPrint('[CallPage] SDP optimization failed, using original: $e');
+    }
+    final optimizedAnswer = RTCSessionDescription(finalSdp, answer.type);
     await _peer!.setLocalDescription(optimizedAnswer);
     _socket.emit('call:sdp', {
       'callId': widget.callId,
       'targetUserId': widget.peerUserId,
       'sdpType': 'answer',
-      'sdp': optimizedAnswer.sdp,
+      'sdp': finalSdp,
     });
 
     if (!mounted) return;
@@ -355,6 +382,18 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         _durationSeconds += 1;
       });
     });
+
+    // 连接建立后重新设置音频路由
+    // Android 上 WebRTC 启动音频会话时可能重置 AudioManager 路由，
+    // 导致之前在 _initCall 里设置的听筒/扬声器失效
+    if (!kIsWeb) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (!mounted) return;
+        try {
+          Helper.setSpeakerphoneOn(_speakerEnabled);
+        } catch (_) {}
+      });
+    }
 
     // 启动网络质量监控
     _startStatsMonitor();
@@ -622,7 +661,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _offerDelayTimer?.cancel();
     _offerDelayTimer = Timer(const Duration(milliseconds: 250), () {
       if (!mounted) return;
-      unawaited(_createAndSendOffer());
+      _createAndSendOffer().catchError((e) {
+        debugPrint('[CallPage] create offer failed: $e');
+      });
     });
   }
 
