@@ -58,6 +58,7 @@ dependencies:
   wakelock_plus: ^1.2.8
   gal: ^2.3.0
   video_thumbnail: ^0.5.6
+  flutter_foreground_task: ^9.2.2
 
 dev_dependencies:
   flutter_test:

@@ -14,12 +14,13 @@ import 'package:im_client/pages/call_page.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/services/notification_service.dart';
+import 'package:im_client/services/foreground_service.dart';
 import 'package:im_client/utils/notification_sound.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService().init();
+  await ForegroundService.init();
   final auth = AuthService();
   await auth.init();
 
@@ -68,6 +69,8 @@ class _IMAppState extends State<IMApp> {
       context.read<ChatProvider>().loadConversations().catchError((_) {});
       context.read<ContactsProvider>().loadFriends().catchError((_) {});
       context.read<ContactsProvider>().loadFriendRequests().catchError((_) {});
+      // 首次登录请求忽略电池优化
+      ForegroundService.requestBatteryOptimization();
     }
   }
 
@@ -216,13 +219,11 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _lastPaused = DateTime.now();
-      // 进入后台：开启 wakelock 防止休眠断连，显示持久通知
-      WakelockPlus.enable();
-      NotificationService().showKeepAliveNotification();
+      // 进入后台：启动 Android 前台服务保持进程存活
+      ForegroundService.start();
     } else if (state == AppLifecycleState.resumed) {
-      // 回到前台：关闭 wakelock，取消持久通知
-      WakelockPlus.disable();
-      NotificationService().cancelKeepAliveNotification();
+      // 回到前台：停止前台服务
+      ForegroundService.stop();
       // 恢复 WebSocket 连接并刷新数据
       _reconnectAndRefresh();
     }
