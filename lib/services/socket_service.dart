@@ -8,7 +8,7 @@ class SocketService {
   String? _token;
   bool _connecting = false;
   Timer? _heartbeatTimer;
-  static const _heartbeatInterval = Duration(seconds: 20);
+  static const _heartbeatInterval = Duration(seconds: 15);
 
   final Map<String, List<Function(dynamic)>> _listeners = {};
 
@@ -119,6 +119,9 @@ class SocketService {
       if (!isConnected && _token != null) {
         debugPrint('[WS] heartbeat: disconnected, attempting reconnect');
         ensureConnected(_token!);
+      } else if (isConnected) {
+        // 发送 ping 保持连接活跃，防止被国产 ROM 网络管理断开
+        _socket?.emit('ping');
       }
     });
   }

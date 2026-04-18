@@ -192,6 +192,8 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _listenKick();
     });
+    // 注册前台服务心跳回调，后台时每 15 秒检查 socket 连接
+    ForegroundService.onKeepAliveTick = _onKeepAliveTick;
   }
 
   void _listenKick() {
@@ -256,12 +258,28 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ForegroundService.onKeepAliveTick = null;
     try {
       final socket = context.read<SocketService>();
       socket.off('auth:kicked');
       socket.off('connect', _onSocketConnect);
     } catch (_) {}
     super.dispose();
+  }
+
+  /// 前台服务每 15 秒触发一次，在后台时检查并恢复 socket 连接
+  void _onKeepAliveTick() {
+    try {
+      final auth = context.read<AuthService>();
+      if (!auth.isLoggedIn) return;
+      final token = auth.token;
+      if (token == null) return;
+      final socket = context.read<SocketService>();
+      if (!socket.isConnected) {
+        debugPrint('[KeepAlive] socket disconnected, reconnecting...');
+        socket.ensureConnected(token);
+      }
+    } catch (_) {}
   }
 
   @override

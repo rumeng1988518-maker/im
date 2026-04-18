@@ -3,11 +3,15 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class ForegroundService {
   static bool _initialized = false;
   static AudioPlayer? _silentPlayer;
   static BytesSource? _silentSource;
+
+  /// 主 isolate 注册的回调，前台服务 handler 发送心跳时触发
+  static Function()? onKeepAliveTick;
 
   static Future<void> init() async {
     if (kIsWeb) return;
@@ -44,6 +48,12 @@ class ForegroundService {
     if (kIsWeb) return;
 
     if (Platform.isAndroid) {
+      // 启用 WakeLock 防止 CPU 休眠，确保 socket 心跳和 Dart Timer 继续运行
+      try { await WakelockPlus.enable(); } catch (_) {}
+
+      // 监听前台服务 handler 发来的心跳信号
+      FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+
       try {
         if (await FlutterForegroundTask.isRunningService) return;
         await FlutterForegroundTask.startService(
@@ -61,10 +71,21 @@ class ForegroundService {
     }
   }
 
+  static void _onTaskData(dynamic data) {
+    // 前台服务 handler 每 15 秒发送一次心跳，唤醒主 isolate
+    if (data == 'keepalive') {
+      onKeepAliveTick?.call();
+    }
+  }
+
   static Future<void> stop() async {
     if (kIsWeb) return;
 
     if (Platform.isAndroid) {
+      // 回到前台，释放 WakeLock
+      try { await WakelockPlus.disable(); } catch (_) {}
+      FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
+
       try {
         if (!await FlutterForegroundTask.isRunningService) return;
         await FlutterForegroundTask.stopService();
@@ -165,7 +186,8 @@ class _KeepAliveHandler extends TaskHandler {
 
   @override
   void onRepeatEvent(DateTime timestamp) {
-    debugPrint('[ForegroundTask] keepalive tick');
+    // 每 15 秒向主 isolate 发送心跳信号，唤醒 Dart 引擎
+    FlutterForegroundTask.sendDataToMain('keepalive');
   }
 
   @override
