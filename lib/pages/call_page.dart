@@ -35,7 +35,7 @@ class CallPage extends StatefulWidget {
   State<CallPage> createState() => _CallPageState();
 }
 
-class _CallPageState extends State<CallPage> {
+class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
 
@@ -76,6 +76,7 @@ class _CallPageState extends State<CallPage> {
   int _prevBytesReceived = 0;
   int _prevPacketsReceived = 0;
   int _prevPacketsLost = 0;
+  Timer? _trackCheckTimer;
   static const int _poorThreshold = 3;       // 连续3次检测差则显示提示
   static const int _iceRestartDelaySec = 5;   // 断连后5秒尝试 ICE 重启
   static const int _iceRestartTimeoutSec = 15; // ICE 重启15秒超时
@@ -90,6 +91,7 @@ class _CallPageState extends State<CallPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _callProvider = context.read<CallProvider>();
     _socket = context.read<SocketService>();
     _api = context.read<ApiClient>();
@@ -122,6 +124,15 @@ class _CallPageState extends State<CallPage> {
       await _localRenderer.initialize();
       await _createPeer();
       await _openLocalAudio();
+
+      // 语音通话默认听筒，视频通话默认扬声器
+      if (!kIsWeb) {
+        final useSpeaker = widget.callType == 'video';
+        try {
+          await Helper.setSpeakerphoneOn(useSpeaker);
+          _speakerEnabled = useSpeaker;
+        } catch (_) {}
+      }
 
       if (_cameraEnabled) {
         await _enableVideoTrack(syncApi: false);
@@ -183,9 +194,35 @@ class _CallPageState extends State<CallPage> {
       }
     };
 
+    // 部分安卓设备只触发 onAddStream，不触发 onTrack
+    // ignore: deprecated_member_use
+    peer.onAddStream = (stream) {
+      if (_remoteStream != null) return; // 已有 onTrack 处理
+      _remoteStream = stream;
+      _remoteRenderer.srcObject = stream;
+      final hasVideo = stream.getVideoTracks().isNotEmpty;
+      if (mounted) {
+        setState(() {
+          _remoteHasVideo = hasVideo;
+        });
+      }
+    };
+
+    // 远程流移除时清理
+    // ignore: deprecated_member_use
+    peer.onRemoveStream = (stream) {
+      if (mounted) {
+        setState(() {
+          _remoteHasVideo = false;
+        });
+      }
+    };
+
     peer.onConnectionState = (state) {
       if (!mounted) return;
+      debugPrint('[CallPage] connectionState: $state');
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _cancelPendingIceRestart();
         _onIceRecovered();
         _markConnected();
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
@@ -201,6 +238,7 @@ class _CallPageState extends State<CallPage> {
     // 监听 ICE 连接状态（比 connectionState 更早触发）
     peer.onIceConnectionState = (state) {
       if (!mounted) return;
+      debugPrint('[CallPage] iceConnectionState: $state');
       if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
         _scheduleIceRestart();
         if (_connected) {
@@ -210,6 +248,7 @@ class _CallPageState extends State<CallPage> {
         _attemptIceRestart();
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
                  state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _cancelPendingIceRestart();
         _onIceRecovered();
       }
     };
@@ -251,12 +290,17 @@ class _CallPageState extends State<CallPage> {
     });
     if (offer.sdp == null || offer.sdp!.isEmpty) return;
 
-    await _peer!.setLocalDescription(offer);
+    // 优化 SDP：启用 Opus FEC/DTX 提升弱网音频质量
+    final optimizedOffer = RTCSessionDescription(
+      _optimizeSdpForWeakNetwork(offer.sdp!),
+      offer.type,
+    );
+    await _peer!.setLocalDescription(optimizedOffer);
     _socket.emit('call:sdp', {
       'callId': widget.callId,
       'targetUserId': widget.peerUserId,
       'sdpType': 'offer',
-      'sdp': offer.sdp,
+      'sdp': optimizedOffer.sdp,
     });
 
     if (!mounted) return;
@@ -273,12 +317,17 @@ class _CallPageState extends State<CallPage> {
     });
     if (answer.sdp == null || answer.sdp!.isEmpty) return;
 
-    await _peer!.setLocalDescription(answer);
+    // 优化 SDP：启用 Opus FEC/DTX 提升弱网音频质量
+    final optimizedAnswer = RTCSessionDescription(
+      _optimizeSdpForWeakNetwork(answer.sdp!),
+      answer.type,
+    );
+    await _peer!.setLocalDescription(optimizedAnswer);
     _socket.emit('call:sdp', {
       'callId': widget.callId,
       'targetUserId': widget.peerUserId,
       'sdpType': 'answer',
-      'sdp': answer.sdp,
+      'sdp': optimizedAnswer.sdp,
     });
 
     if (!mounted) return;
@@ -309,6 +358,8 @@ class _CallPageState extends State<CallPage> {
 
     // 启动网络质量监控
     _startStatsMonitor();
+    // 启动远程音频轨道健康监控
+    _startTrackHealthMonitor();
   }
 
   // ── 网络质量监控 ──
@@ -393,6 +444,12 @@ class _CallPageState extends State<CallPage> {
 
   // ── ICE 重启与恢复 ──
 
+  /// 取消尚未触发的 ICE 重启定时器（ICE 自然恢复时调用）
+  void _cancelPendingIceRestart() {
+    _iceRestartTimer?.cancel();
+    _iceRestartTimer = null;
+  }
+
   void _scheduleIceRestart() {
     if (_iceRestarting || _hangingUp) return;
     _iceRestartTimer?.cancel();
@@ -428,8 +485,120 @@ class _CallPageState extends State<CallPage> {
     _iceRestartTimer?.cancel();
     debugPrint('[CallPage] ICE connection recovered');
     if (mounted && _connected) {
-      setState(() => _statusText = '通话中');
+      setState(() {
+        _statusText = '通话中';
+        _networkPoor = false;
+      });
+      _consecutivePoorCount = 0;
     }
+  }
+
+  // ── 远程音频轨道健康检查 ──
+
+  void _startTrackHealthMonitor() {
+    _trackCheckTimer?.cancel();
+    _trackCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted || !_connected) return;
+      _checkRemoteAudioHealth();
+    });
+  }
+
+  void _checkRemoteAudioHealth() {
+    final stream = _remoteStream;
+    if (stream == null) return;
+
+    final audioTracks = stream.getAudioTracks();
+    if (audioTracks.isEmpty) {
+      debugPrint('[CallPage] Remote audio track missing');
+      return;
+    }
+
+    for (final track in audioTracks) {
+      // 如果远程音频轨道被意外禁用（部分安卓设备弱网后出现），重新启用
+      if (!track.enabled) {
+        debugPrint('[CallPage] Remote audio track disabled, re-enabling');
+        track.enabled = true;
+      }
+    }
+
+    // 确保本地音频轨道仍然活跃（未被系统中断）
+    if (_audioTrack != null && !_muted && !_audioTrack!.enabled) {
+      debugPrint('[CallPage] Local audio track unexpectedly disabled, re-enabling');
+      _audioTrack!.enabled = true;
+    }
+  }
+
+  // ── 应用生命周期处理 ──
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // 从后台回来，检查音频轨道和连接状态
+      _checkRemoteAudioHealth();
+      // 确保音频路由未改变
+      if (!kIsWeb && _connected) {
+        try {
+          Helper.setSpeakerphoneOn(_speakerEnabled);
+        } catch (_) {}
+      }
+      // 检查 ICE 连接状态，如果断了则触发重启
+      if (_peer != null && _connected) {
+        _peer!.getConnectionState().then((connState) {
+          if (!mounted) return;
+          if (connState == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+              connState == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+            _attemptIceRestart();
+          }
+        }).catchError((_) {});
+      }
+    }
+  }
+
+  // ── SDP 优化：启用 Opus FEC 和 DTX 以增强弱网抗丢包能力 ──
+
+  String _optimizeSdpForWeakNetwork(String sdp) {
+    // 在 Opus codec 的 fmtp 行中添加:
+    //   useinbandfec=1  → 前向纠错，接收端可从后续包恢复丢失的音频帧
+    //   usedtx=1        → 静音时不传输，节省带宽
+    //   maxaveragebitrate=24000 → 限制平均码率为24kbps，减少弱网压力
+    //   stereo=0        → 单声道，通话不需要立体声
+    final lines = sdp.split('\r\n');
+    final result = <String>[];
+
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      result.add(line);
+
+      // 找到 Opus 的 fmtp 行
+      if (line.startsWith('a=fmtp:') && i > 0) {
+        // 检查前面是否有 opus rtpmap
+        final fmtpPt = RegExp(r'^a=fmtp:(\d+)').firstMatch(line)?.group(1);
+        if (fmtpPt != null) {
+          // 查找对应的 rtpmap 确认是 opus
+          final isOpus = lines.any((l) =>
+              l.toLowerCase().contains('a=rtpmap:$fmtpPt opus/'));
+          if (isOpus) {
+            // 在 fmtp 行末尾追加参数（如果不存在）
+            final idx = result.length - 1;
+            var fmtpLine = result[idx];
+            if (!fmtpLine.contains('useinbandfec')) {
+              fmtpLine += ';useinbandfec=1';
+            }
+            if (!fmtpLine.contains('usedtx')) {
+              fmtpLine += ';usedtx=1';
+            }
+            if (!fmtpLine.contains('stereo')) {
+              fmtpLine += ';stereo=0';
+            }
+            if (!fmtpLine.contains('maxaveragebitrate')) {
+              fmtpLine += ';maxaveragebitrate=24000';
+            }
+            result[idx] = fmtpLine;
+          }
+        }
+      }
+    }
+    return result.join('\r\n');
   }
 
   Future<void> _flushPendingCandidates() async {
@@ -928,10 +1097,12 @@ class _CallPageState extends State<CallPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _durationTimer?.cancel();
     _offerDelayTimer?.cancel();
     _statsTimer?.cancel();
     _iceRestartTimer?.cancel();
+    _trackCheckTimer?.cancel();
     _callProvider.callPageDidDispose();
     _callProvider.setInCall(false);
 
