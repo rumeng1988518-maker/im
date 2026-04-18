@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' if (dart.library.html) 'dart:io';
 import 'dart:typed_data';
 
@@ -1426,7 +1427,12 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     // Message content
+    // 将 content 中的 JSON 字符串解析为 Map（兼容服务端返回字符串的情况）
+    _ensureContentParsed(msg);
     final content = _getMsgContent(msg);
+    final msgType = _intType(msg['type']);
+    // 图片、视频、相册不需要气泡背景和内边距
+    final isMediaType = msgType == 2 || msgType == 4 || msgType == 11;
 
     return Column(
       children: [
@@ -1448,19 +1454,23 @@ class _ChatPageState extends State<ChatPage> {
                     GestureDetector(
                       onLongPressStart: (details) => _showMsgMenu(msg, isSelf, details.globalPosition),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isSelf ? AppColors.bubbleSelf : AppColors.bubbleOther,
-                          borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(12),
-                            topRight: const Radius.circular(12),
-                            bottomLeft: Radius.circular(isSelf ? 12 : 4),
-                            bottomRight: Radius.circular(isSelf ? 4 : 12),
-                          ),
-                          boxShadow: [
-                            BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 1)),
-                          ],
-                        ),
+                        padding: isMediaType
+                            ? EdgeInsets.zero
+                            : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: isMediaType
+                            ? null
+                            : BoxDecoration(
+                                color: isSelf ? AppColors.bubbleSelf : AppColors.bubbleOther,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: const Radius.circular(12),
+                                  topRight: const Radius.circular(12),
+                                  bottomLeft: Radius.circular(isSelf ? 12 : 4),
+                                  bottomRight: Radius.circular(isSelf ? 4 : 12),
+                                ),
+                                boxShadow: [
+                                  BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 1)),
+                                ],
+                              ),
                         child: _buildMsgContentWithReply(msg, content),
                       ),
                     ),
@@ -1483,8 +1493,28 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// 将 type 安全转为 int（兼容服务端返回 String 的情况）
+  int _intType(dynamic type) {
+    if (type is int) return type;
+    if (type is num) return type.toInt();
+    if (type is String) return int.tryParse(type) ?? 0;
+    return 0;
+  }
+
+  /// 确保 msg['content'] 是 Map（服务端有时返回 JSON 字符串）
+  void _ensureContentParsed(Map<String, dynamic> msg) {
+    final content = msg['content'];
+    if (content is String && content.startsWith('{')) {
+      try {
+        msg['content'] = Map<String, dynamic>.from(
+          json.decode(content) as Map,
+        );
+      } catch (_) {}
+    }
+  }
+
   Widget _getMsgContent(Map<String, dynamic> msg) {
-    final type = msg['type'];
+    final type = _intType(msg['type']);
     if (type == 1) {
       final content = msg['content'];
       String text;
