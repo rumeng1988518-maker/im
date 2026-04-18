@@ -67,6 +67,19 @@ class _CallPageState extends State<CallPage> {
   Timer? _offerDelayTimer;
   int _durationSeconds = 0;
 
+  // ── 弱网检测与 ICE 重启 ──
+  Timer? _statsTimer;
+  Timer? _iceRestartTimer;
+  bool _iceRestarting = false;
+  bool _networkPoor = false;
+  int _consecutivePoorCount = 0;  // 连续差网计数
+  int _prevBytesReceived = 0;
+  int _prevPacketsReceived = 0;
+  int _prevPacketsLost = 0;
+  static const int _poorThreshold = 3;       // 连续3次检测差则显示提示
+  static const int _iceRestartDelaySec = 5;   // 断连后5秒尝试 ICE 重启
+  static const int _iceRestartTimeoutSec = 15; // ICE 重启15秒超时
+
   late final Function(dynamic) _onAcceptedHandler;
   late final Function(dynamic) _onRejectedHandler;
   late final Function(dynamic) _onEndedHandler;
@@ -173,11 +186,31 @@ class _CallPageState extends State<CallPage> {
     peer.onConnectionState = (state) {
       if (!mounted) return;
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _onIceRecovered();
         _markConnected();
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
-        setState(() => _statusText = '连接失败');
+        // 连接彻底失败，尝试一次 ICE 重启
+        _attemptIceRestart();
+        setState(() => _statusText = '连接失败，正在重试...');
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
-        setState(() => _statusText = '连接中断');
+        _scheduleIceRestart();
+        setState(() => _statusText = '网络波动，恢复中...');
+      }
+    };
+
+    // 监听 ICE 连接状态（比 connectionState 更早触发）
+    peer.onIceConnectionState = (state) {
+      if (!mounted) return;
+      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+        _scheduleIceRestart();
+        if (_connected) {
+          setState(() => _statusText = '网络波动，恢复中...');
+        }
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _attemptIceRestart();
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+                 state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        _onIceRecovered();
       }
     };
 
@@ -185,16 +218,14 @@ class _CallPageState extends State<CallPage> {
   }
 
   Future<void> _openLocalAudio() async {
-    final constraints = kIsWeb
-        ? {
-            'audio': {
-              'echoCancellation': true,
-              'noiseSuppression': true,
-              'autoGainControl': true,
-            },
-            'video': false,
-          }
-        : {'audio': true, 'video': false};
+    final constraints = {
+      'audio': {
+        'echoCancellation': true,
+        'noiseSuppression': true,
+        'autoGainControl': true,
+      },
+      'video': false,
+    };
     final stream = await navigator.mediaDevices.getUserMedia(constraints);
     _localStream = stream;
 
@@ -205,17 +236,18 @@ class _CallPageState extends State<CallPage> {
     if (!_audioReady.isCompleted) _audioReady.complete();
   }
 
-  Future<void> _createAndSendOffer({bool force = false}) async {
+  Future<void> _createAndSendOffer({bool force = false, bool iceRestart = false}) async {
     if (_peer == null) return;
-    if (!force && _initialOfferSent) return;
+    if (!force && !iceRestart && _initialOfferSent) return;
     // 等待本地音频就绪（首次授权可能有延迟）
     await _audioReady.future;
-    if (!force) {
+    if (!force && !iceRestart) {
       _initialOfferSent = true;
     }
     final offer = await _peer!.createOffer({
       'offerToReceiveAudio': 1,
       'offerToReceiveVideo': 1,
+      if (iceRestart) 'iceRestart': true,
     });
     if (offer.sdp == null || offer.sdp!.isEmpty) return;
 
@@ -263,6 +295,7 @@ class _CallPageState extends State<CallPage> {
     setState(() {
       _connected = true;
       _statusText = '通话中';
+      _networkPoor = false;
     });
 
     _durationTimer?.cancel();
@@ -273,6 +306,130 @@ class _CallPageState extends State<CallPage> {
         _durationSeconds += 1;
       });
     });
+
+    // 启动网络质量监控
+    _startStatsMonitor();
+  }
+
+  // ── 网络质量监控 ──
+
+  void _startStatsMonitor() {
+    _statsTimer?.cancel();
+    _prevBytesReceived = 0;
+    _prevPacketsReceived = 0;
+    _prevPacketsLost = 0;
+    _consecutivePoorCount = 0;
+
+    _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!mounted || _peer == null) return;
+      _checkNetworkQuality();
+    });
+  }
+
+  Future<void> _checkNetworkQuality() async {
+    if (_peer == null) return;
+    try {
+      final stats = await _peer!.getStats();
+      int totalBytesReceived = 0;
+      int totalPacketsReceived = 0;
+      int totalPacketsLost = 0;
+      double? currentRtt;
+
+      for (final report in stats) {
+        final values = report.values;
+        // 入站 RTP 音频统计
+        if (report.type == 'inbound-rtp' || values['type'] == 'inbound-rtp') {
+          final kind = values['kind']?.toString() ?? values['mediaType']?.toString() ?? '';
+          if (kind != 'audio') continue;
+          totalBytesReceived += (values['bytesReceived'] as num?)?.toInt() ?? 0;
+          totalPacketsReceived += (values['packetsReceived'] as num?)?.toInt() ?? 0;
+          totalPacketsLost += (values['packetsLost'] as num?)?.toInt() ?? 0;
+        }
+        // RTT 从 candidate-pair
+        if (report.type == 'candidate-pair' || values['type'] == 'candidate-pair') {
+          final rtt = values['currentRoundTripTime'];
+          if (rtt is num && rtt > 0) {
+            currentRtt = rtt.toDouble();
+          }
+        }
+      }
+
+      // 计算增量
+      final deltaPacketsReceived = totalPacketsReceived - _prevPacketsReceived;
+      final deltaPacketsLost = totalPacketsLost - _prevPacketsLost;
+      final deltaBytesReceived = totalBytesReceived - _prevBytesReceived;
+
+      _prevBytesReceived = totalBytesReceived;
+      _prevPacketsReceived = totalPacketsReceived;
+      _prevPacketsLost = totalPacketsLost;
+
+      // 判断网络是否差：
+      // 1. 丢包率 > 15%
+      // 2. 或 RTT > 400ms
+      // 3. 或完全没有收到数据
+      bool isPoor = false;
+      if (deltaPacketsReceived + deltaPacketsLost > 0) {
+        final lossRate = deltaPacketsLost / (deltaPacketsReceived + deltaPacketsLost);
+        if (lossRate > 0.15) isPoor = true;
+      }
+      if (currentRtt != null && currentRtt > 0.4) isPoor = true;
+      if (_connected && deltaBytesReceived == 0 && _prevBytesReceived > 0) isPoor = true;
+
+      if (isPoor) {
+        _consecutivePoorCount++;
+      } else {
+        _consecutivePoorCount = 0;
+      }
+
+      if (!mounted) return;
+      final shouldShowPoor = _consecutivePoorCount >= _poorThreshold;
+      if (shouldShowPoor != _networkPoor) {
+        setState(() => _networkPoor = shouldShowPoor);
+      }
+    } catch (e) {
+      debugPrint('[CallPage] getStats error: $e');
+    }
+  }
+
+  // ── ICE 重启与恢复 ──
+
+  void _scheduleIceRestart() {
+    if (_iceRestarting || _hangingUp) return;
+    _iceRestartTimer?.cancel();
+    _iceRestartTimer = Timer(Duration(seconds: _iceRestartDelaySec), () {
+      if (!mounted || _hangingUp) return;
+      _attemptIceRestart();
+    });
+  }
+
+  void _attemptIceRestart() {
+    if (_iceRestarting || _hangingUp || _peer == null) return;
+    _iceRestarting = true;
+    debugPrint('[CallPage] Attempting ICE restart...');
+
+    // 设置超时：若 ICE 重启后仍无法恢复，提示用户
+    _iceRestartTimer?.cancel();
+    _iceRestartTimer = Timer(Duration(seconds: _iceRestartTimeoutSec), () {
+      if (!mounted) return;
+      if (_iceRestarting) {
+        setState(() => _statusText = '网络恢复失败');
+      }
+    });
+
+    // 发起 ICE restart offer
+    _createAndSendOffer(force: true, iceRestart: true).catchError((e) {
+      debugPrint('[CallPage] ICE restart failed: $e');
+    });
+  }
+
+  void _onIceRecovered() {
+    if (!_iceRestarting) return;
+    _iceRestarting = false;
+    _iceRestartTimer?.cancel();
+    debugPrint('[CallPage] ICE connection recovered');
+    if (mounted && _connected) {
+      setState(() => _statusText = '通话中');
+    }
   }
 
   Future<void> _flushPendingCandidates() async {
@@ -524,7 +681,7 @@ class _CallPageState extends State<CallPage> {
   }
 
   String _buildStatusText() {
-    if (_connected) {
+    if (_connected && !_iceRestarting) {
       final mm = (_durationSeconds ~/ 60).toString().padLeft(2, '0');
       final ss = (_durationSeconds % 60).toString().padLeft(2, '0');
       return '通话中  $mm:$ss';
@@ -534,41 +691,44 @@ class _CallPageState extends State<CallPage> {
 
   Map<String, dynamic> _normalizeRtcConfig(Map<String, dynamic> source) {
     final rawIceServers = source['iceServers'];
+    List<Map<String, dynamic>> iceServers;
+
     if (rawIceServers is! List || rawIceServers.isEmpty) {
-      return {
-        'iceServers': [
-          {'urls': ['stun:stun.l.google.com:19302']},
-        ],
-      };
-    }
+      iceServers = [
+        {'urls': ['stun:stun.l.google.com:19302']},
+      ];
+    } else {
+      iceServers = <Map<String, dynamic>>[];
+      for (final item in rawIceServers) {
+        if (item is! Map) continue;
+        final map = Map<String, dynamic>.from(item);
+        final urls = map['urls'];
+        if (urls == null) continue;
 
-    final iceServers = <Map<String, dynamic>>[];
-    for (final item in rawIceServers) {
-      if (item is! Map) continue;
-      final map = Map<String, dynamic>.from(item);
-      final urls = map['urls'];
-      if (urls == null) continue;
+        if (urls is String) {
+          map['urls'] = [urls];
+        } else if (urls is List) {
+          map['urls'] = urls.map((e) => e.toString()).toList();
+        } else {
+          continue;
+        }
 
-      if (urls is String) {
-        map['urls'] = [urls];
-      } else if (urls is List) {
-        map['urls'] = urls.map((e) => e.toString()).toList();
-      } else {
-        continue;
+        iceServers.add(map);
       }
 
-      iceServers.add(map);
-    }
-
-    if (iceServers.isEmpty) {
-      return {
-        'iceServers': [
+      if (iceServers.isEmpty) {
+        iceServers = [
           {'urls': ['stun:stun.l.google.com:19302']},
-        ],
-      };
+        ];
+      }
     }
 
-    return {'iceServers': iceServers};
+    return {
+      'iceServers': iceServers,
+      'bundlePolicy': 'max-bundle',
+      'rtcpMuxPolicy': 'require',
+      'iceCandidatePoolSize': 1,
+    };
   }
 
   Widget _buildVoiceCenter() {
@@ -689,6 +849,24 @@ class _CallPageState extends State<CallPage> {
                   _buildStatusText(),
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
+                // 弱网提示横幅
+                if (_networkPoor)
+                  Container(
+                    margin: const EdgeInsets.only(top: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCCFF8800),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.signal_cellular_connected_no_internet_0_bar, color: Colors.white, size: 16),
+                        SizedBox(width: 6),
+                        Text('当前网络环境不佳', style: TextStyle(color: Colors.white, fontSize: 13)),
+                      ],
+                    ),
+                  ),
                 const SizedBox(height: 18),
                 Expanded(
                   child: AnimatedSwitcher(
@@ -752,6 +930,8 @@ class _CallPageState extends State<CallPage> {
   void dispose() {
     _durationTimer?.cancel();
     _offerDelayTimer?.cancel();
+    _statsTimer?.cancel();
+    _iceRestartTimer?.cancel();
     _callProvider.callPageDidDispose();
     _callProvider.setInCall(false);
 

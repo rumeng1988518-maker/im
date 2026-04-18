@@ -367,26 +367,49 @@ class ChatProvider extends ChangeNotifier {
       // 如果用户正在查看该会话，不增加未读数
       if (_currentConvId != convId) {
         _conversations[convIdx]['unreadCount'] = ((_conversations[convIdx]['unreadCount'] as num?)?.toInt() ?? 0) + 1;
-        // 如果未开启免打扰，播放提示音
+        // 如果未开启免打扰，播放提示音并发送系统通知
         final isDisturb = _conversations[convIdx]['isDisturb'] == true;
         if (!isDisturb) {
           NotificationSound.play();
-          // 发送系统通知栏通知
-          final senderName = msg['senderNickname']?.toString() ?? msg['senderName']?.toString() ?? '新消息';
+          // 提取发送者名称（服务端格式: sender: {nickname, avatarUrl, userId}）
+          final sender = msg['sender'];
+          final senderName = (sender is Map ? sender['nickname']?.toString() : null)
+              ?? msg['senderNickname']?.toString()
+              ?? msg['senderName']?.toString()
+              ?? '新消息';
+          // 通知正文：根据消息类型生成（1=文本, 2=图片, 3=语音, ...）
           String body;
-          switch (msg['type']) {
-            case 1: body = '[图片]'; break;
-            case 2: body = '[语音]'; break;
-            case 3: body = '[视频]'; break;
-            case 4: body = '[文件]'; break;
-            case 5: body = '[位置]'; break;
-            default: body = msg['content']?.toString() ?? '你收到一条新消息';
+          final msgType = msg['type'];
+          switch (msgType) {
+            case 2: body = '[图片]'; break;
+            case 3: body = '[语音]'; break;
+            case 4: body = '[视频]'; break;
+            case 5: body = '[文件]'; break;
+            case 6: body = '[位置]'; break;
+            case 7: body = '[红包]'; break;
+            case 9: body = '[通话记录]'; break;
+            case 10: body = '[名片]'; break;
+            case 11: body = '[相册]'; break;
+            default:
+              // type=1 文字消息或其他，提取 content.text
+              final content = msg['content'];
+              if (content is Map) {
+                body = content['text']?.toString() ?? '你收到一条新消息';
+              } else if (content is String) {
+                body = content.isNotEmpty ? content : '你收到一条新消息';
+              } else {
+                body = '你收到一条新消息';
+              }
           }
-          NotificationService().showMessageNotification(
-            senderName: senderName,
-            body: body,
-            conversationId: convId,
-          );
+          try {
+            NotificationService().showMessageNotification(
+              senderName: senderName,
+              body: body,
+              conversationId: convId,
+            );
+          } catch (e) {
+            debugPrint('[ChatProvider] notification error: $e');
+          }
         }
       }
       _sortConversations();

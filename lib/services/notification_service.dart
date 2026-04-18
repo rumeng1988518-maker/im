@@ -27,13 +27,22 @@ class NotificationService {
       iOS: iosSettings,
     );
 
-    await _plugin.initialize(settings);
-    _initialized = true;
+    try {
+      await _plugin.initialize(settings);
+      _initialized = true;
 
-    // Request permissions on Android 13+
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+      // Request permissions on Android 13+
+      await _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+
+      // Request permissions on iOS
+      await _plugin
+          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+    } catch (e) {
+      debugPrint('[NotificationService] init error: $e');
+    }
   }
 
   /// 持久前台通知（用于后台保活）
