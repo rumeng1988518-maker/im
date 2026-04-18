@@ -8,9 +8,7 @@ class SocketService {
   String? _token;
   bool _connecting = false;
   Timer? _heartbeatTimer;
-  int _missedPongs = 0;
-  static const _heartbeatInterval = Duration(seconds: 15);
-  static const _maxMissedPongs = 2;
+  static const _heartbeatInterval = Duration(seconds: 20);
 
   final Map<String, List<Function(dynamic)>> _listeners = {};
 
@@ -44,14 +42,12 @@ class SocketService {
         .enableReconnection()
         .setReconnectionDelay(1000)
         .setReconnectionDelayMax(5000)
-        .setReconnectionAttempts(double.infinity.toInt())
         .build();
 
     _socket = io.io(AppConfig.wsUrl, opts);
 
     _socket!.onConnect((_) {
       _connecting = false;
-      _missedPongs = 0;
       debugPrint('[WS] connected');
       _startHeartbeat();
       _emitLocal('connect', null);
@@ -78,11 +74,6 @@ class SocketService {
       debugPrint('[WS] disconnected');
       _stopHeartbeat();
       _emitLocal('disconnect', null);
-    });
-
-    // 服务端 pong 响应
-    _socket!.on('pong', (_) {
-      _missedPongs = 0;
     });
 
     // Listen for message events
@@ -124,29 +115,11 @@ class SocketService {
 
   void _startHeartbeat() {
     _stopHeartbeat();
-    _missedPongs = 0;
     _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
-      if (!isConnected) {
-        debugPrint('[WS] heartbeat: not connected, attempting reconnect');
-        _stopHeartbeat();
-        if (_token != null) {
-          ensureConnected(_token!);
-        }
-        return;
+      if (!isConnected && _token != null) {
+        debugPrint('[WS] heartbeat: disconnected, attempting reconnect');
+        ensureConnected(_token!);
       }
-      _missedPongs++;
-      if (_missedPongs > _maxMissedPongs) {
-        debugPrint('[WS] heartbeat: missed $_missedPongs pongs, reconnecting');
-        _stopHeartbeat();
-        _socket?.disconnect();
-        if (_token != null) {
-          Future.delayed(const Duration(milliseconds: 500), () {
-            ensureConnected(_token!);
-          });
-        }
-        return;
-      }
-      _socket?.emit('ping', null);
     });
   }
 
