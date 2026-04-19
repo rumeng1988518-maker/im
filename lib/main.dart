@@ -286,9 +286,23 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _lastPaused = DateTime.now();
+      // 通知服务端用户进入后台（服务端对后台用户也发推送）
+      try {
+        final socket = context.read<SocketService>();
+        if (socket.isConnected) {
+          socket.emit('user:background', {});
+        }
+      } catch (_) {}
       // 进入后台：启动 Android 前台服务保持进程存活
       ForegroundService.start();
     } else if (state == AppLifecycleState.resumed) {
+      // 通知服务端用户回到前台
+      try {
+        final socket = context.read<SocketService>();
+        if (socket.isConnected) {
+          socket.emit('user:foreground', {});
+        }
+      } catch (_) {}
       // 回到前台：停止前台服务
       ForegroundService.stop();
       // 恢复 WebSocket 连接并刷新数据
