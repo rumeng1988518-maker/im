@@ -309,6 +309,15 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       if (!socket.isConnected) {
         debugPrint('[KeepAlive] socket disconnected, reconnecting...');
         socket.ensureConnected(token);
+        // 如果连不上，通过 API 轮询会话列表（确保不丢消息、通知和角标）
+        Future.delayed(const Duration(seconds: 3), () {
+          if (!socket.isConnected) {
+            debugPrint('[KeepAlive] still disconnected, polling via API...');
+            try {
+              context.read<ChatProvider>().pollAndNotify().catchError((_) {});
+            } catch (_) {}
+          }
+        });
       }
     } catch (_) {}
   }

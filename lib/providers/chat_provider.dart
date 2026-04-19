@@ -738,6 +738,64 @@ class ChatProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 后台轮询：获取会话列表，如果发现未读数增加，弹本地通知
+  Future<void> pollAndNotify() async {
+    try {
+      // 记录轮询前每个会话的未读数
+      final oldUnread = <String, int>{};
+      for (final c in _conversations) {
+        final id = c['conversationId']?.toString();
+        if (id != null) {
+          oldUnread[id] = (c['unreadCount'] as num?)?.toInt() ?? 0;
+        }
+      }
+
+      await loadConversations();
+
+      // 对比轮询后的未读数，对增加的会话弹通知
+      final ns = NotificationService();
+      for (final c in _conversations) {
+        final id = c['conversationId']?.toString();
+        if (id == null || id == _currentConvId) continue;
+        final newUnread = (c['unreadCount'] as num?)?.toInt() ?? 0;
+        final prevUnread = oldUnread[id] ?? 0;
+        if (newUnread > prevUnread) {
+          // 有新消息，弹本地通知
+          final lastMsg = c['lastMessage'] as Map<String, dynamic>?;
+          final convName = c['name']?.toString() ?? c['targetNickname']?.toString() ?? '新消息';
+          String body = '你收到 ${newUnread - prevUnread} 条新消息';
+          if (lastMsg != null) {
+            final msgType = lastMsg['type'];
+            switch (msgType) {
+              case 2: body = '[图片]'; break;
+              case 3: body = '[语音]'; break;
+              case 4: body = '[视频]'; break;
+              case 5: body = '[文件]'; break;
+              case 9: body = '[通话记录]'; break;
+              default:
+                final content = lastMsg['content'];
+                if (content is Map && content['text'] != null) {
+                  body = content['text'].toString();
+                } else if (content is String && content.isNotEmpty) {
+                  body = content;
+                }
+            }
+          }
+          try {
+            NotificationSound.play();
+            ns.showMessageNotification(
+              senderName: convName,
+              body: body,
+              conversationId: id,
+            );
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      debugPrint('[ChatProvider] pollAndNotify error: $e');
+    }
+  }
+
   String getConvDisplayName(Map<String, dynamic> conv) {
     if (conv['type'] == 1 && conv['targetUser'] != null) {
       final remark = conv['targetUser']['remark']?.toString() ?? '';

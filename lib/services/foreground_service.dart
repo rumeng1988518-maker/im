@@ -1,4 +1,5 @@
-﻿import 'dart:io';
+﻿import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -9,6 +10,7 @@ class ForegroundService {
   static bool _initialized = false;
   static AudioPlayer? _silentPlayer;
   static BytesSource? _silentSource;
+  static Timer? _iosHeartbeatTimer;
 
   /// 主 isolate 注册的回调，前台服务 handler 发送心跳时触发
   static Function()? onKeepAliveTick;
@@ -68,6 +70,11 @@ class ForegroundService {
       }
     } else if (Platform.isIOS) {
       await _startSilentAudio();
+      // iOS: start periodic heartbeat timer (like Android foreground task)
+      _iosHeartbeatTimer?.cancel();
+      _iosHeartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+        onKeepAliveTick?.call();
+      });
     }
   }
 
@@ -93,6 +100,8 @@ class ForegroundService {
         debugPrint('[ForegroundService] Android stop error: $e');
       }
     } else if (Platform.isIOS) {
+      _iosHeartbeatTimer?.cancel();
+      _iosHeartbeatTimer = null;
       await _stopSilentAudio();
     }
   }
