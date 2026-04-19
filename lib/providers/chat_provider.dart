@@ -19,6 +19,9 @@ class ChatProvider extends ChangeNotifier {
   Timer? _loadDebounce;
   /// 最近已读的会话 ID（用于 loadConversations 合并时强制清零，防止服务端旧数据覆盖）
   final Set<String> _recentlyReadConvIds = {};
+  /// 并发锁 + 节流：避免重复请求
+  Future<void>? _loadConvFuture;
+  DateTime? _lastLoadConvTime;
 
   ChatProvider({required this.api, required this.socket}) {
     socket.on('message:new', _onNewMessage);
@@ -89,7 +92,24 @@ class ChatProvider extends ChangeNotifier {
     });
   }
 
-  Future<void> loadConversations() async {
+  /// 加载会话列表（带并发锁和 2 秒节流）
+  Future<void> loadConversations({bool force = false}) async {
+    // 如果已有请求在进行中，复用同一个 Future
+    if (_loadConvFuture != null) return _loadConvFuture!;
+    // 2 秒内不重复请求（除非 force）
+    if (!force && _lastLoadConvTime != null &&
+        DateTime.now().difference(_lastLoadConvTime!).inSeconds < 2) {
+      return;
+    }
+    _loadConvFuture = _doLoadConversations();
+    try {
+      await _loadConvFuture;
+    } finally {
+      _loadConvFuture = null;
+    }
+  }
+
+  Future<void> _doLoadConversations() async {
     try {
       _loading = true;
       notifyListeners();
@@ -140,6 +160,7 @@ class ChatProvider extends ChangeNotifier {
       }
       _sortConversations();
       _loading = false;
+      _lastLoadConvTime = DateTime.now();
       notifyListeners();
     } catch (e) {
       _loading = false;
@@ -248,11 +269,22 @@ class ChatProvider extends ChangeNotifier {
     return result;
   }
 
-  Future<void> loadMessages(String convId) async {
+  /// 消息加载时间缓存：会话 ID → 上次加载时间
+  final Map<String, DateTime> _messagesLoadTime = {};
+
+  Future<void> loadMessages(String convId, {bool force = false}) async {
+    // 30 秒内不重复加载同一会话的消息（除非 force）
+    if (!force && _messages.containsKey(convId) && _messages[convId]!.isNotEmpty) {
+      final lastLoad = _messagesLoadTime[convId];
+      if (lastLoad != null && DateTime.now().difference(lastLoad).inSeconds < 30) {
+        return;
+      }
+    }
     try {
       final data = await api.get('/messages', params: {'conversationId': convId, 'limit': 50});
       final list = List<Map<String, dynamic>>.from(data is List ? data : (data?['list'] ?? []));
       _messages[convId] = list;
+      _messagesLoadTime[convId] = DateTime.now();
       notifyListeners();
     } catch (e) {
       rethrow;
@@ -341,7 +373,7 @@ class ChatProvider extends ChangeNotifier {
     }
 
     notifyListeners();
-    loadConversations();
+    _debouncedLoadConversations();
   }
 
   void markPendingMessageFailed(String convId, String localId) {
@@ -433,7 +465,7 @@ class ChatProvider extends ChangeNotifier {
 
   Future<Map<String, dynamic>> createPrivateConv(int targetUserId) async {
     final data = await api.post('/conversations/private', data: {'targetUserId': targetUserId});
-    await loadConversations();
+    await loadConversations(force: true);
     return Map<String, dynamic>.from(data);
   }
 
@@ -649,7 +681,7 @@ class ChatProvider extends ChangeNotifier {
 
   void _onConversationCreated(dynamic data) {
     // 有新的群会话被创建，刷新会话列表
-    loadConversations();
+    _debouncedLoadConversations();
   }
 
   void _onConversationRemoved(dynamic data) {
@@ -663,7 +695,7 @@ class ChatProvider extends ChangeNotifier {
 
   void _onMemberRemoved(dynamic data) {
     // 有成员被移除/退出，刷新会话列表以更新成员数等信息
-    loadConversations();
+    _debouncedLoadConversations();
   }
 
   void _onConversationUpdated(dynamic data) {

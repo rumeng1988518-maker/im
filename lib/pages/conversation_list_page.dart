@@ -30,9 +30,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ChatProvider>().loadConversations();
-    });
+    // loadConversations 已在 main.dart _connectAndLoad 中调用，这里不重复
   }
 
   @override

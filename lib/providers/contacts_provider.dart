@@ -31,13 +31,21 @@ class ContactsProvider extends ChangeNotifier {
   bool get loading => _loading;
   int get pendingRequestCount => _pendingRequestCount;
 
-  Future<void> loadFriends() async {
+  DateTime? _lastLoadFriendsTime;
+
+  Future<void> loadFriends({bool force = false}) async {
+    // 2 秒内不重复请求
+    if (!force && _lastLoadFriendsTime != null &&
+        DateTime.now().difference(_lastLoadFriendsTime!).inSeconds < 2) {
+      return;
+    }
     try {
       _loading = true;
       notifyListeners();
       final data = await api.get('/friends');
       _friends = List<Map<String, dynamic>>.from(data?['list'] ?? data ?? []);
       _loading = false;
+      _lastLoadFriendsTime = DateTime.now();
       notifyListeners();
     } catch (e) {
       _loading = false;
