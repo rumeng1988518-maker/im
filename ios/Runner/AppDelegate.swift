@@ -7,6 +7,7 @@ import UserNotifications
   private var deviceToken: String?
   private var pendingTokenResult: FlutterResult?
   private var pushChannel: FlutterMethodChannel?
+  private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
 
   override func application(
     _ application: UIApplication,
@@ -111,4 +112,30 @@ import UserNotifications
 
   // Badge clearing is now controlled by Flutter (ChatProvider._updateAppBadge)
   // Do NOT clear badge/notifications here — user may not have read them yet
+
+  // MARK: - Background Task Management
+  // Request extra background execution time from iOS so audio player + timers can start
+  override func applicationDidEnterBackground(_ application: UIApplication) {
+    print("[AppDelegate] Entering background, requesting background task")
+    if backgroundTaskId != .invalid {
+      application.endBackgroundTask(backgroundTaskId)
+      backgroundTaskId = .invalid
+    }
+    backgroundTaskId = application.beginBackgroundTask(withName: "IMKeepAlive") { [weak self] in
+      print("[AppDelegate] Background task expired")
+      if let taskId = self?.backgroundTaskId, taskId != .invalid {
+        application.endBackgroundTask(taskId)
+        self?.backgroundTaskId = .invalid
+      }
+    }
+    print("[AppDelegate] Background task started, remaining time: \(application.backgroundTimeRemaining)")
+  }
+
+  override func applicationWillEnterForeground(_ application: UIApplication) {
+    print("[AppDelegate] Entering foreground")
+    if backgroundTaskId != .invalid {
+      application.endBackgroundTask(backgroundTaskId)
+      backgroundTaskId = .invalid
+    }
+  }
 }

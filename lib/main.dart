@@ -328,8 +328,8 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
           socket.emit('user:background', {});
         }
       } catch (_) {}
-      // 进入后台：启动 Android 前台服务保持进程存活
-      ForegroundService.start();
+      // 进入后台：启动保活（iOS 预热过的播放器只需 resume，很快）
+      _startBackgroundService();
     } else if (state == AppLifecycleState.resumed) {
       // 通知服务端用户回到前台
       try {
@@ -341,6 +341,15 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       // 先恢复连接和数据，再停止后台保活
       _reconnectAndRefresh();
       ForegroundService.stop();
+    }
+  }
+
+  /// 异步启动后台保活服务（iOS 上 await 确保音频播放器真正 resume 后再继续）
+  Future<void> _startBackgroundService() async {
+    try {
+      await ForegroundService.start();
+    } catch (e) {
+      debugPrint('[KeepAlive] start background service error: $e');
     }
   }
 

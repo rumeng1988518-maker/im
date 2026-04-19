@@ -1,6 +1,5 @@
 ﻿import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -9,8 +8,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 class ForegroundService {
   static bool _initialized = false;
   static AudioPlayer? _silentPlayer;
-  static BytesSource? _silentSource;
   static Timer? _iosHeartbeatTimer;
+  static bool _iosAudioReady = false;
 
   /// 主 isolate 注册的回调，前台服务 handler 发送心跳时触发
   static Function()? onKeepAliveTick;
@@ -43,6 +42,9 @@ class ForegroundService {
           stopWithTask: false,
         ),
       );
+    } else if (Platform.isIOS) {
+      // iOS: 预热音频播放器，这样进入后台时只需 resume，不需要重新创建
+      await _prepareIOSSilentPlayer();
     }
   }
 
@@ -69,12 +71,18 @@ class ForegroundService {
         debugPrint('[ForegroundService] Android start error: $e');
       }
     } else if (Platform.isIOS) {
-      await _startSilentAudio();
-      // iOS: start periodic heartbeat timer (like Android foreground task)
+      // iOS: 恢复预热好的静音播放器（极快，不需要重新创建）
+      await _resumeIOSSilentPlayer();
+      // 启动心跳定时器
       _iosHeartbeatTimer?.cancel();
       _iosHeartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         onKeepAliveTick?.call();
       });
+      // 立即触发一次心跳，不等15秒
+      Future.delayed(const Duration(seconds: 2), () {
+        onKeepAliveTick?.call();
+      });
+      debugPrint('[ForegroundService] iOS background keep-alive started');
     }
   }
 
@@ -102,7 +110,9 @@ class ForegroundService {
     } else if (Platform.isIOS) {
       _iosHeartbeatTimer?.cancel();
       _iosHeartbeatTimer = null;
-      await _stopSilentAudio();
+      // 不销毁播放器，只暂停，这样下次 start 可以极快恢复
+      await _pauseIOSSilentPlayer();
+      debugPrint('[ForegroundService] iOS background keep-alive stopped');
     }
   }
 
@@ -119,10 +129,12 @@ class ForegroundService {
     }
   }
 
-  static Future<void> _startSilentAudio() async {
+  /// iOS: 预热静音播放器 — 在 init() 时调用，设置好音频会话和播放器
+  static Future<void> _prepareIOSSilentPlayer() async {
     if (_silentPlayer != null) return;
     try {
       final player = AudioPlayer();
+      // 设置 playback + mixWithOthers 音频会话，这是后台播放的关键
       await player.setAudioContext(AudioContext(
         iOS: AudioContextIOS(
           category: AVAudioSessionCategory.playback,
@@ -131,54 +143,41 @@ class ForegroundService {
           },
         ),
       ));
-      _silentSource ??= BytesSource(_generateSilentWav());
       await player.setReleaseMode(ReleaseMode.loop);
-      await player.setVolume(0.01);
-      await player.play(_silentSource!);
+      await player.setVolume(0.05);
+      // 用真实的 asset 文件（而不是内存生成的 bytes），iOS 更可靠
+      await player.setSource(AssetSource('audio/silence.wav'));
       _silentPlayer = player;
-      debugPrint('[ForegroundService] iOS silent audio started');
+      _iosAudioReady = true;
+      debugPrint('[ForegroundService] iOS silent player prepared');
     } catch (e) {
-      debugPrint('[ForegroundService] iOS silent audio error: $e');
+      debugPrint('[ForegroundService] iOS prepare player error: $e');
     }
   }
 
-  static Future<void> _stopSilentAudio() async {
+  /// iOS: 恢复播放（进入后台时调用）— 极快，因为播放器已经预热好了
+  static Future<void> _resumeIOSSilentPlayer() async {
     try {
-      await _silentPlayer?.stop();
-      await _silentPlayer?.dispose();
-    } catch (_) {}
-    _silentPlayer = null;
-    debugPrint('[ForegroundService] iOS silent audio stopped');
+      if (_silentPlayer == null || !_iosAudioReady) {
+        await _prepareIOSSilentPlayer();
+      }
+      await _silentPlayer?.resume();
+      debugPrint('[ForegroundService] iOS silent audio resumed');
+    } catch (e) {
+      debugPrint('[ForegroundService] iOS resume error: $e');
+      // 如果恢复失败，重新创建
+      _silentPlayer = null;
+      _iosAudioReady = false;
+      await _prepareIOSSilentPlayer();
+      try { await _silentPlayer?.resume(); } catch (_) {}
+    }
   }
 
-  static Uint8List _generateSilentWav() {
-    const sampleRate = 8000;
-    const duration = 1;
-    const numSamples = sampleRate * duration;
-    const dataSize = numSamples * 2;
-    const fileSize = 44 + dataSize;
-
-    final buf = ByteData(fileSize);
-    int o = 0;
-    buf.setUint8(o++, 0x52); buf.setUint8(o++, 0x49);
-    buf.setUint8(o++, 0x46); buf.setUint8(o++, 0x46);
-    buf.setUint32(o, fileSize - 8, Endian.little); o += 4;
-    buf.setUint8(o++, 0x57); buf.setUint8(o++, 0x41);
-    buf.setUint8(o++, 0x56); buf.setUint8(o++, 0x45);
-    buf.setUint8(o++, 0x66); buf.setUint8(o++, 0x6D);
-    buf.setUint8(o++, 0x74); buf.setUint8(o++, 0x20);
-    buf.setUint32(o, 16, Endian.little); o += 4;
-    buf.setUint16(o, 1, Endian.little); o += 2;
-    buf.setUint16(o, 1, Endian.little); o += 2;
-    buf.setUint32(o, sampleRate, Endian.little); o += 4;
-    buf.setUint32(o, sampleRate * 2, Endian.little); o += 4;
-    buf.setUint16(o, 2, Endian.little); o += 2;
-    buf.setUint16(o, 16, Endian.little); o += 2;
-    buf.setUint8(o++, 0x64); buf.setUint8(o++, 0x61);
-    buf.setUint8(o++, 0x74); buf.setUint8(o++, 0x61);
-    buf.setUint32(o, dataSize, Endian.little); o += 4;
-
-    return buf.buffer.asUint8List();
+  /// iOS: 暂停播放（回到前台时调用）— 不销毁播放器
+  static Future<void> _pauseIOSSilentPlayer() async {
+    try {
+      await _silentPlayer?.pause();
+    } catch (_) {}
   }
 }
 
