@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'dart:io' show Platform;
+import 'package:flutter/services.dart';
 
 /// 来电通知固定 ID，方便取消
 const int _callNotificationId = 99999;
@@ -36,10 +37,27 @@ class NotificationService {
       await _plugin.initialize(settings);
       _initialized = true;
 
+      final androidImpl = _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
       // Request permissions on Android 13+
-      await _plugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
+      await androidImpl?.requestNotificationsPermission();
+
+      // 删除旧通道（importance 变更后旧通道不会生效）
+      await androidImpl?.deleteNotificationChannel('im_messages');
+
+      // 预创建高优先级消息通道，确保在发送通知前通道已存在
+      await androidImpl?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'im_messages_v2',
+          '消息通知',
+          description: '新消息通知',
+          importance: Importance.high,
+          enableVibration: true,
+          playSound: true,
+          showBadge: true,
+        ),
+      );
 
       // Request permissions on iOS
       await _plugin
@@ -47,6 +65,36 @@ class NotificationService {
           ?.requestPermissions(alert: true, badge: true, sound: true);
     } catch (e) {
       debugPrint('[NotificationService] init error: $e');
+    }
+  }
+
+  /// 检查通知权限是否已开启
+  Future<bool> areNotificationsEnabled() async {
+    if (!_initialized || kIsWeb) return false;
+    try {
+      final androidImpl = _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      if (androidImpl != null) {
+        return await androidImpl.areNotificationsEnabled() ?? false;
+      }
+      return true; // iOS 默认返回 true
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 打开系统通知设置页面
+  Future<void> openNotificationSettings() async {
+    try {
+      // 使用 Android Intent 打开应用通知设置
+      const channel = MethodChannel('im_client/notification');
+      await channel.invokeMethod('openNotificationSettings');
+    } catch (_) {
+      // fallback: 直接打开应用详情
+      try {
+        const channel = MethodChannel('im_client/notification');
+        await channel.invokeMethod('openAppSettings');
+      } catch (_) {}
     }
   }
 
@@ -105,7 +153,7 @@ class NotificationService {
     if (!_initialized) return;
 
     const androidDetails = AndroidNotificationDetails(
-      'im_messages',
+      'im_messages_v2',
       '消息通知',
       channelDescription: '新消息通知',
       importance: Importance.high,
@@ -113,6 +161,9 @@ class NotificationService {
       enableVibration: true,
       playSound: true,
       channelShowBadge: true,
+      ticker: '新消息',
+      category: AndroidNotificationCategory.message,
+      visibility: NotificationVisibility.public,
     );
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,

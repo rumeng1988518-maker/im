@@ -84,6 +84,8 @@ class _IMAppState extends State<IMApp> {
       context.read<ContactsProvider>().loadFriendRequests().catchError((_) {});
       // 首次登录请求忽略电池优化
       ForegroundService.requestBatteryOptimization();
+      // 检查通知权限（国产 Android 可能默认关闭）
+      _checkNotificationPermission();
       // 上报 push token（iOS APNs / Android FCM）
       _uploadPushToken();
       // 监听 token 刷新/延迟到达（Android FCM refresh + iOS native push）
@@ -91,6 +93,37 @@ class _IMAppState extends State<IMApp> {
         debugPrint('[Push] Token refresh/arrived: ${newToken.substring(0, 8)}...');
         _uploadPushTokenWithValue(newToken);
       });
+    }
+  }
+
+  Future<void> _checkNotificationPermission() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      await Future.delayed(const Duration(seconds: 3));
+      final enabled = await NotificationService().areNotificationsEnabled();
+      if (!enabled && mounted) {
+        final ctx = context;
+        if (!ctx.mounted) return;
+        showDialog(
+          context: ctx,
+          builder: (c) => AlertDialog(
+            title: const Text('通知权限未开启'),
+            content: const Text('通知权限未开启，您可能无法收到新消息提醒。请在设置中开启通知权限。'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(c), child: const Text('稍后再说')),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(c);
+                  NotificationService().openNotificationSettings();
+                },
+                child: const Text('去开启'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Main] check notification permission error: $e');
     }
   }
 
