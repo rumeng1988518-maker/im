@@ -250,6 +250,22 @@ class _SettingsPageState extends State<SettingsPage> {
       buf.writeln('Host: ${apns['host']}');
       buf.writeln('BundleId: ${apns['bundleId']}');
       buf.writeln('证书路径: ${apns['certPath']}');
+      // 显示证书详细信息
+      final ci = apns['certInfo'] as Map<String, dynamic>?;
+      if (ci != null) {
+        buf.writeln('');
+        buf.writeln('=== 证书信息 ===');
+        buf.writeln('主题: ${ci['subject'] ?? '未知'}');
+        buf.writeln('有效期: ${ci['validFrom'] ?? '?'} → ${ci['validTo'] ?? '?'}');
+        if (ci['expired'] == true) buf.writeln('⚠ 证书已过期!');
+        if (ci['isPushCert'] == true) {
+          buf.writeln('类型: APNs 推送证书 ✓');
+        } else if (ci['isDistCert'] == true) {
+          buf.writeln('⚠ 这是打包/签名证书，不是推送证书!');
+        } else {
+          buf.writeln('类型: ${ci['subject'] ?? '未知'}');
+        }
+      }
       buf.writeln('');
       buf.writeln('=== 已注册设备 (${devices.length}) ===');
       for (final d in devices) {
