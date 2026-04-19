@@ -147,14 +147,18 @@ class _ChatPageState extends State<ChatPage> {
 
     final chat = context.read<ChatProvider>();
 
-    final count = await chat.loadMoreMessages(widget.conversationId);
-    if (count == 0) {
-      if (mounted) setState(() { _hasMoreHistory = false; _loadingMore = false; });
-      return;
+    try {
+      final count = await chat.loadMoreMessages(widget.conversationId);
+      if (count == 0) {
+        if (mounted) setState(() { _hasMoreHistory = false; _loadingMore = false; });
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
+    } catch (e) {
+      // 网络错误时不标记"没有更多"，下次还能重试
+      if (mounted) setState(() => _loadingMore = false);
     }
-
-    if (!mounted) return;
-    setState(() => _loadingMore = false);
     // reverse ListView 自动保持视觉位置，无需手动调整
   }
 

@@ -320,7 +320,7 @@ class ChatProvider extends ChangeNotifier {
       return newMsgs.length;
     } catch (e) {
       debugPrint('[ChatProvider] loadMoreMessages error: $e');
-      return 0;
+      rethrow; // 让 UI 层区分"网络错误"和"没有更多消息"
     }
   }
 
