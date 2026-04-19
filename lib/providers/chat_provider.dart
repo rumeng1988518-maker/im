@@ -385,6 +385,8 @@ class ChatProvider extends ChangeNotifier {
       idx = msgs.indexWhere((m) => m['clientMsgId'] == localId);
     }
     if (idx < 0) return;
+    // 如果 WS 广播已将消息标记为 sent，不要覆盖为 failed
+    if (msgs[idx]['sendState'] == 'sent') return;
     msgs[idx]['sendState'] = 'failed';
     notifyListeners();
   }
@@ -501,13 +503,16 @@ class ChatProvider extends ChangeNotifier {
       return false;
     });
     if (alreadyExists) {
-      // 如果是 pending 消息（sendState == sending），用服务端数据更新它
+      // 如果是 pending/failed 消息，用服务端数据更新它（HTTP超时但WS广播到达时恢复）
       final pendingIdx = list.indexWhere((m) =>
-        clientMsgId != null && clientMsgId.isNotEmpty && m['clientMsgId']?.toString() == clientMsgId && m['sendState'] == 'sending');
+        clientMsgId != null && clientMsgId.isNotEmpty &&
+        m['clientMsgId']?.toString() == clientMsgId &&
+        (m['sendState'] == 'sending' || m['sendState'] == 'failed'));
       if (pendingIdx >= 0) {
         list[pendingIdx]['messageId'] = msgId;
         list[pendingIdx]['sendState'] = 'sent';
         list[pendingIdx]['status'] = 1;
+        list[pendingIdx]['seq'] = msg['seq'];
         list[pendingIdx]['createdAt'] = msg['createdAt'] ?? list[pendingIdx]['createdAt'];
         // 同步服务端返回的 content（含真实 url），防止本地 content 停留在 uploading 状态
         if (msg['content'] != null) {
