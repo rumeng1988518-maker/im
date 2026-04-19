@@ -191,9 +191,34 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
     // 监听被踢下线事件
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _listenKick();
+      _listenAuthLogout();
     });
     // 注册前台服务心跳回调，后台时每 15 秒检查 socket 连接
     ForegroundService.onKeepAliveTick = _onKeepAliveTick;
+  }
+
+  /// 监听 AuthService logout —— 当 API 拦截器因 token 失效调用 logout 时跳转登录页
+  void _listenAuthLogout() {
+    try {
+      final auth = context.read<AuthService>();
+      auth.addListener(_onAuthChanged);
+    } catch (_) {}
+  }
+
+  void _onAuthChanged() {
+    try {
+      final auth = context.read<AuthService>();
+      if (!auth.isLoggedIn && auth.initialized) {
+        // token 被清除（API 401 触发的 logout）
+        final nav = IMApp.navigatorKey.currentState;
+        if (nav != null) {
+          nav.pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LandingPage()),
+            (_) => false,
+          );
+        }
+      }
+    } catch (_) {}
   }
 
   void _listenKick() {
@@ -259,6 +284,9 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     ForegroundService.onKeepAliveTick = null;
+    try {
+      context.read<AuthService>().removeListener(_onAuthChanged);
+    } catch (_) {}
     try {
       final socket = context.read<SocketService>();
       socket.off('auth:kicked');

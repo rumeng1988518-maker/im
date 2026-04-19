@@ -47,6 +47,16 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? get refreshToken => _refreshToken;
+
+  Future<void> updateTokens(String accessToken, String refreshToken) async {
+    _token = accessToken;
+    _refreshToken = refreshToken;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('im_token', accessToken);
+    await prefs.setString('im_refresh_token', refreshToken);
+  }
+
   Future<void> logout() async {
     _token = null;
     _refreshToken = null;
