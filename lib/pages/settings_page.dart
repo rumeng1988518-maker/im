@@ -243,9 +243,13 @@ class _SettingsPageState extends State<SettingsPage> {
       buf.writeln('=== APNs 服务端 ===');
       buf.writeln('启用: ${apns['enabled']}');
       buf.writeln('证书已加载: ${apns['certLoaded']}');
+      if (apns['certError'] != null) {
+        buf.writeln('证书错误: ${apns['certError']}');
+      }
       buf.writeln('连接状态: ${apns['connected']}');
       buf.writeln('Host: ${apns['host']}');
       buf.writeln('BundleId: ${apns['bundleId']}');
+      buf.writeln('证书路径: ${apns['certPath']}');
       buf.writeln('');
       buf.writeln('=== 已注册设备 (${devices.length}) ===');
       for (final d in devices) {

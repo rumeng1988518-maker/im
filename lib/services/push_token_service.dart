@@ -4,7 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 /// Manages push token registration.
-/// - iOS: APNs device token via native MethodChannel
+/// - iOS: APNs device token via native MethodChannel (primary)
+///        + FirebaseMessaging.getAPNSToken() fallback
 /// - Android: FCM token via firebase_messaging
 class PushTokenService {
   static const _channel = MethodChannel('im.client/push');
@@ -20,7 +21,7 @@ class PushTokenService {
       if (Platform.isAndroid) {
         _platform = 'android';
         final token = await FirebaseMessaging.instance.getToken();
-        debugPrint('[PushToken] Android FCM token: ${token?.substring(0, 8) ?? 'null'}...');
+        debugPrint('[PushToken] Android FCM token: ${token != null ? '${token.substring(0, 8)}...' : 'null'}');
         if (token != null && token.isNotEmpty) {
           _cachedToken = token;
         }
@@ -29,11 +30,31 @@ class PushTokenService {
         _platform = 'ios';
         // Set up native → Flutter listener for token arrival
         _setupIOSListener();
-        final token = await _channel.invokeMethod<String>('getDeviceToken');
-        debugPrint('[PushToken] iOS APNs token: ${token != null ? '${token.substring(0, 8)}...' : 'null'}');
-        if (token != null && token.isNotEmpty) {
-          _cachedToken = token;
+
+        // 方法1: 通过 MethodChannel 获取原生 APNs token
+        try {
+          final token = await _channel.invokeMethod<String>('getDeviceToken');
+          debugPrint('[PushToken] iOS MethodChannel token: ${token != null ? '${token.substring(0, 8)}...' : 'null'}');
+          if (token != null && token.isNotEmpty) {
+            _cachedToken = token;
+            return _cachedToken;
+          }
+        } catch (e) {
+          debugPrint('[PushToken] iOS MethodChannel error: $e');
         }
+
+        // 方法2: 通过 FirebaseMessaging 获取 APNs token（备用方案）
+        try {
+          final apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+          debugPrint('[PushToken] iOS FirebaseMessaging APNs token: ${apnsToken != null ? '${apnsToken.substring(0, 8)}...' : 'null'}');
+          if (apnsToken != null && apnsToken.isNotEmpty) {
+            _cachedToken = apnsToken;
+            return _cachedToken;
+          }
+        } catch (e) {
+          debugPrint('[PushToken] iOS FirebaseMessaging fallback error: $e');
+        }
+
         return _cachedToken;
       }
     } catch (e) {
