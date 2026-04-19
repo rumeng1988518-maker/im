@@ -61,6 +61,7 @@ import UserNotifications
   override func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
     let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
     self.deviceToken = token
+    print("[APNs] Device token: \(token)")
     // Resolve pending Flutter result
     if let pending = pendingTokenResult {
       pending(token)
@@ -74,6 +75,20 @@ import UserNotifications
       pending(nil)
       pendingTokenResult = nil
     }
+  }
+
+  // Handle remote notification in background — required for content-available
+  override func application(_ application: UIApplication,
+                            didReceiveRemoteNotification userInfo: [AnyHashable : Any],
+                            fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+    print("[APNs] Received remote notification: \(userInfo)")
+    completionHandler(.newData)
+  }
+
+  // Clear badge when app becomes active
+  override func applicationDidBecomeActive(_ application: UIApplication) {
+    application.applicationIconBadgeNumber = 0
+    UNUserNotificationCenter.current().removeAllDeliveredNotifications()
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {

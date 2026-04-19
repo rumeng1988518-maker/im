@@ -7,6 +7,7 @@ import 'package:im_client/services/socket_service.dart';
 import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/pages/landing_page.dart';
+import 'package:im_client/services/push_token_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -93,6 +94,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 12),
                 _group([
                   _tile(Icons.info_outline, '关于内部通', const Color(0xFF42A5F5), onTap: () => _showAbout(context)),
+                  _tile(Icons.notifications_active, '推送诊断', const Color(0xFF26A69A), onTap: _showPushDiagnostics),
                 ]),
                 const SizedBox(height: 24),
                 Container(
@@ -145,6 +147,84 @@ class _SettingsPageState extends State<SettingsPage> {
         activeTrackColor: AppColors.primary,
       ),
     );
+  }
+
+  Future<void> _showPushDiagnostics() async {
+    final api = context.read<ApiClient>();
+    String info = '正在获取推送状态...';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          // 首次加载
+          if (info == '正在获取推送状态...') {
+            _fetchPushStatus(api).then((result) {
+              if (ctx.mounted) setDialogState(() => info = result);
+            });
+          }
+          return AlertDialog(
+            title: const Text('推送诊断'),
+            content: SingleChildScrollView(
+              child: SelectableText(info, style: const TextStyle(fontSize: 13)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  setDialogState(() => info = '正在发送测试推送...');
+                  try {
+                    final res = await api.post('/debug/push-test');
+                    final results = res['results'] as List? ?? [];
+                    if (results.isEmpty) {
+                      setDialogState(() => info = '没有可用的推送设备（push_token 为空）');
+                    } else {
+                      final buf = StringBuffer('测试推送已发送:\n');
+                      for (final r in results) {
+                        buf.writeln('  ${r['type']}: ${r['status']} ${r['error'] ?? ''}');
+                      }
+                      buf.writeln('\n请切到后台等几秒，看是否收到通知');
+                      setDialogState(() => info = buf.toString());
+                    }
+                  } catch (e) {
+                    setDialogState(() => info = '发送失败: $e');
+                  }
+                },
+                child: const Text('发送测试推送'),
+              ),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<String> _fetchPushStatus(ApiClient api) async {
+    try {
+      final localToken = PushTokenService.cachedToken;
+      final res = await api.get('/debug/push-status');
+      final apns = res['apns'] as Map<String, dynamic>? ?? {};
+      final devices = res['devices'] as List? ?? [];
+      final buf = StringBuffer();
+      buf.writeln('=== 本地状态 ===');
+      buf.writeln('平台: ${PushTokenService.platform}');
+      buf.writeln('本地Token: ${localToken != null ? '${localToken.substring(0, 12)}...' : '(无)'}');
+      buf.writeln('');
+      buf.writeln('=== APNs 服务端 ===');
+      buf.writeln('启用: ${apns['enabled']}');
+      buf.writeln('证书已加载: ${apns['certLoaded']}');
+      buf.writeln('连接状态: ${apns['connected']}');
+      buf.writeln('Host: ${apns['host']}');
+      buf.writeln('BundleId: ${apns['bundleId']}');
+      buf.writeln('');
+      buf.writeln('=== 已注册设备 (${devices.length}) ===');
+      for (final d in devices) {
+        buf.writeln('  ${d['deviceType']}: token=${d['hasPushToken'] ? d['tokenPrefix'] : '(无)'}');
+      }
+      return buf.toString();
+    } catch (e) {
+      return '获取失败: $e';
+    }
   }
 
   void _showChangePassword() {
