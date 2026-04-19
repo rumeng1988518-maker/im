@@ -19,12 +19,25 @@ class SocketService {
   void ensureConnected(String token) {
     _token = token;
     if (isConnected) return;
-    if (_socket != null && !_connecting) {
-      _socket!.connect();
-    } else if (_socket == null) {
+    if (_socket != null) {
+      // socket.io 可能正在自动重连，但国产 ROM 可能导致重连卡死
+      // 检查是否长时间未连接成功，若超过 30 秒则强制重建连接
+      final lastDisconnect = _lastDisconnectTime;
+      if (lastDisconnect != null &&
+          DateTime.now().difference(lastDisconnect).inSeconds > 30) {
+        debugPrint('[WS] ensureConnected: stale socket, force reconnect');
+        connect(token);
+        return;
+      }
+      if (!_connecting) {
+        _socket!.connect();
+      }
+    } else {
       connect(token);
     }
   }
+
+  DateTime? _lastDisconnectTime;
 
   void connect(String token) {
     if (_token == token && (isConnected || _connecting)) {
@@ -48,6 +61,7 @@ class SocketService {
 
     _socket!.onConnect((_) {
       _connecting = false;
+      _lastDisconnectTime = null;
       debugPrint('[WS] connected');
       _startHeartbeat();
       _emitLocal('connect', null);
@@ -71,6 +85,7 @@ class SocketService {
 
     _socket!.onDisconnect((_) {
       _connecting = false;
+      _lastDisconnectTime = DateTime.now();
       debugPrint('[WS] disconnected');
       _stopHeartbeat();
       _emitLocal('disconnect', null);

@@ -59,6 +59,19 @@ class NotificationService {
         ),
       );
 
+      // 预创建角标通道（国产 ROM 需要通道 showBadge=true + importance>=default 才显示桌面红点）
+      await androidImpl?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'im_badge',
+          '未读消息角标',
+          description: '用于显示桌面图标未读数量',
+          importance: Importance.defaultImportance,
+          enableVibration: false,
+          playSound: false,
+          showBadge: true,
+        ),
+      );
+
       // Request permissions on iOS
       await _plugin
           .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
@@ -285,7 +298,7 @@ class NotificationService {
         'im_badge',
         '未读消息角标',
         channelDescription: '用于显示桌面图标未读数量',
-        importance: Importance.low,
+        importance: Importance.defaultImportance,
         priority: Priority.low,
         number: count,
         showWhen: false,
@@ -294,6 +307,7 @@ class NotificationService {
         ongoing: false,
         onlyAlertOnce: true,
         channelShowBadge: true,
+        silent: true,
       );
       final iosDetails = DarwinNotificationDetails(
         presentAlert: false,

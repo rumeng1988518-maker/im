@@ -37,15 +37,18 @@ void main() async {
   final auth = AuthService();
   await auth.init();
 
-  // 启动时验证本地 token 是否仍有效
+  // 启动时验证本地 token 是否仍有效（不阻塞启动，防止 iOS 白屏）
   if (auth.isLoggedIn) {
-    try {
-      final api = ApiClient(auth, baseUrl: AppConfig.baseUrl);
-      await api.get('/users/me');
-    } catch (_) {
-      // ApiClient 拦截器会在 token 失效(40101/40102/40103)时自动 logout
-      // 网络超时等非认证错误不清除登录态，保留离线可用性
-    }
+    // 异步验证：网络慢时不影响 UI 加载，token 失效时拦截器自动 logout
+    Future.microtask(() async {
+      try {
+        final api = ApiClient(auth, baseUrl: AppConfig.baseUrl);
+        await api.get('/users/me');
+      } catch (_) {
+        // ApiClient 拦截器会在 token 失效(40101/40102/40103)时自动 logout
+        // 网络超时等非认证错误不清除登录态，保留离线可用性
+      }
+    });
   }
 
   runApp(IMApp(auth: auth));
@@ -343,10 +346,9 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
         debugPrint('[KeepAlive] socket disconnected, reconnecting...');
         socket.ensureConnected(token);
       }
-      // iOS 没有 APNs 推送，每次心跳都通过 API 轮询确保不丢消息和角标
-      if (!kIsWeb && Platform.isIOS) {
-        context.read<ChatProvider>().pollAndNotify().catchError((_) {});
-      }
+      // 后台轮询：通过 API 检查新消息并弹本地通知（Android + iOS 都需要）
+      // Android 即使有前台服务，socket 也可能被国产 ROM 网络管理断开导致丢消息
+      context.read<ChatProvider>().pollAndNotify().catchError((_) {});
     } catch (_) {}
   }
 
@@ -400,8 +402,14 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       // 如果后台超过 3 秒，主动刷新数据（弥补可能丢失的推送）
       final paused = _lastPaused;
       if (paused != null && DateTime.now().difference(paused).inSeconds > 3) {
-        context.read<ChatProvider>().loadConversations().catchError((_) {});
+        final chatProvider = context.read<ChatProvider>();
+        chatProvider.loadConversations(force: true).catchError((_) {});
         context.read<ContactsProvider>().loadFriends().catchError((_) {});
+        // 如果用户正在查看某个会话，也刷新该会话的消息
+        final currentConv = chatProvider.currentConvId;
+        if (currentConv != null) {
+          chatProvider.loadMessages(currentConv, force: true).catchError((_) {});
+        }
       }
     } catch (_) {}
   }
