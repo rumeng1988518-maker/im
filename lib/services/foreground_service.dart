@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 class ForegroundService {
   static bool _initialized = false;
@@ -52,9 +51,6 @@ class ForegroundService {
     if (kIsWeb) return;
 
     if (Platform.isAndroid) {
-      // 启用 WakeLock 防止 CPU 休眠，确保 socket 心跳和 Dart Timer 继续运行
-      try { await WakelockPlus.enable(); } catch (_) {}
-
       // 监听前台服务 handler 发来的心跳信号
       FlutterForegroundTask.addTaskDataCallback(_onTaskData);
 
@@ -70,6 +66,10 @@ class ForegroundService {
       } catch (e) {
         debugPrint('[ForegroundService] Android start error: $e');
       }
+      // Android: 立即触发一次心跳，不等15秒（socket 断连后尽快轮询新消息）
+      Future.delayed(const Duration(seconds: 3), () {
+        onKeepAliveTick?.call();
+      });
     } else if (Platform.isIOS) {
       // iOS: 恢复预热好的静音播放器（极快，不需要重新创建）
       await _resumeIOSSilentPlayer();
@@ -97,8 +97,6 @@ class ForegroundService {
     if (kIsWeb) return;
 
     if (Platform.isAndroid) {
-      // 回到前台，释放 WakeLock
-      try { await WakelockPlus.disable(); } catch (_) {}
       FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
 
       try {

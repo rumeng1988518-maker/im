@@ -14,10 +14,12 @@ class ApiClient {
   ApiClient(this._auth, {required String baseUrl}) {
     _dio = Dio(BaseOptions(
       baseUrl: baseUrl,
-      connectTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 15),
-      sendTimeout: const Duration(seconds: 10),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'IMClient/1.0',
+      },
     ));
 
     _dio.interceptors.add(InterceptorsWrapper(
@@ -192,18 +194,33 @@ class ApiClient {
   }
 
   Future<dynamic> _safeRequest(Future<Response<dynamic>> Function() request) async {
-    try {
-      final resp = await request();
-      final data = resp.data;
-      if (data is Map) {
-        return data['data'];
+    // 网络超时/连接错误自动重试 1 次（对 POST 也安全，服务端有 clientMsgId 幂等）
+    for (int attempt = 0; attempt <= 1; attempt++) {
+      try {
+        final resp = await request();
+        final data = resp.data;
+        if (data is Map) {
+          return data['data'];
+        }
+        return data;
+      } on DioException catch (e) {
+        if (attempt < 1 && _isRetryable(e)) {
+          await Future.delayed(const Duration(milliseconds: 800));
+          continue;
+        }
+        throw AppException(ErrorMessage.fromDio(e));
+      } catch (e) {
+        throw AppException(ErrorMessage.from(e));
       }
-      return data;
-    } on DioException catch (e) {
-      throw AppException(ErrorMessage.fromDio(e));
-    } catch (e) {
-      throw AppException(ErrorMessage.from(e));
     }
+    throw AppException('请求失败');
+  }
+
+  bool _isRetryable(DioException e) {
+    return e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.connectionError;
   }
 }
 

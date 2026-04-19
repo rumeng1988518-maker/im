@@ -37,19 +37,9 @@ void main() async {
   final auth = AuthService();
   await auth.init();
 
-  // 启动时验证本地 token 是否仍有效（不阻塞启动，防止 iOS 白屏）
-  if (auth.isLoggedIn) {
-    // 异步验证：网络慢时不影响 UI 加载，token 失效时拦截器自动 logout
-    Future.microtask(() async {
-      try {
-        final api = ApiClient(auth, baseUrl: AppConfig.baseUrl);
-        await api.get('/users/me');
-      } catch (_) {
-        // ApiClient 拦截器会在 token 失效(40101/40102/40103)时自动 logout
-        // 网络超时等非认证错误不清除登录态，保留离线可用性
-      }
-    });
-  }
+  // token 有效性由 ApiClient 拦截器在首次请求时自动检测：
+  // 若 token 过期 → 自动 refresh → 若 refresh 失败 → 自动 logout
+  // 不在此处创建额外 ApiClient，避免与主 ApiClient 并发刷新 token 导致竞态
 
   runApp(IMApp(auth: auth));
 }

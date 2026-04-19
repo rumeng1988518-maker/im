@@ -100,6 +100,17 @@ class _ChatPageState extends State<ChatPage> {
         if (!mounted) return;
         _scrollToBottom();
         _markLatestIncomingAsRead(chat.getMessages(widget.conversationId));
+      }).catchError((e) {
+        // 首次加载失败，2秒后自动重试一次
+        debugPrint('[ChatPage] loadMessages error: $e');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (!mounted) return;
+          chat.loadMessages(widget.conversationId, force: true).then((_) {
+            if (!mounted) return;
+            _scrollToBottom();
+            _markLatestIncomingAsRead(chat.getMessages(widget.conversationId));
+          }).catchError((_) {});
+        });
       });
     });
   }
