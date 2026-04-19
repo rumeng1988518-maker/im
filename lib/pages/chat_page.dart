@@ -3086,10 +3086,33 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
   Future<void> _downloadAndPlay() async {
     setState(() { _downloading = true; _downloadProgress = 0; _hasError = false; _errorDetail = ''; });
     try {
-      // 先下载视频到临时文件，避免 iOS CoreMedia 对 Range 请求的要求
+      // Android: 优先尝试直接网络播放（ExoPlayer 有更好的格式嗅探和自适应解码）
+      if (!kIsWeb && Platform.isAndroid) {
+        setState(() { _downloading = false; });
+        try {
+          final controller = VideoPlayerController.networkUrl(
+            Uri.parse(widget.videoUrl),
+          );
+          _controller = controller;
+          await controller.initialize();
+          if (!mounted) return;
+          controller.addListener(() { if (mounted) setState(() {}); });
+          setState(() {});
+          controller.play();
+          return; // 网络播放成功，直接返回
+        } catch (e) {
+          debugPrint('[VideoPreview] Android network play failed, trying download: $e');
+          _controller?.dispose();
+          _controller = null;
+          // 回退到下载播放
+          setState(() { _downloading = true; _downloadProgress = 0; });
+        }
+      }
+
+      // iOS 或 Android 回退：下载到本地文件播放
       final dir = await getTemporaryDirectory();
-      final ext = widget.videoUrl.contains('.') ? widget.videoUrl.split('.').last.split('?').first : 'mp4';
-      final filePath = '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      // 统一用 .mp4 扩展名，避免 .MOV 等扩展名触发不同解码路径
+      final filePath = '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.mp4';
       
       await Dio().download(
         widget.videoUrl,
