@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/services/api_client.dart';
@@ -710,10 +711,10 @@ class _MediaListPage extends StatelessWidget {
               ),
             ));
           },
-          child: Image.network(
-            resolvedUrl,
+          child: CachedNetworkImage(
+            imageUrl: resolvedUrl,
             fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => Container(
+            errorWidget: (_, _, _) => Container(
               color: const Color(0xFFE0E0E0),
               child: const Icon(Icons.broken_image, color: Colors.grey),
             ),

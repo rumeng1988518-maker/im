@@ -17,6 +17,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:open_file/open_file.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/providers/chat_provider.dart';
@@ -2025,10 +2026,10 @@ class _ChatPageState extends State<ChatPage> {
                               _openImagePreview(url);
                             }
                           },
-                          child: Image.network(
-                            url,
+                          child: CachedNetworkImage(
+                            imageUrl: url,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Container(
+                            errorWidget: (_, _, _) => Container(
                               color: const Color(0xFFE0E0E0),
                               child: const Icon(Icons.broken_image_outlined, color: AppColors.textSecondary, size: 24),
                             ),
@@ -2249,22 +2250,19 @@ class _ChatPageState extends State<ChatPage> {
       onTap: () => _openImagePreview(url),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Image.network(
-          url,
+        child: CachedNetworkImage(
+          imageUrl: url,
           width: 180,
           height: 180,
           fit: BoxFit.cover,
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) return child;
-            return Container(
+          placeholder: (_, _) => Container(
               width: 180,
               height: 180,
               color: Colors.black12,
               alignment: Alignment.center,
               child: const CircularProgressIndicator(strokeWidth: 2),
-            );
-          },
-          errorBuilder: (_, _, _) => Container(
+            ),
+          errorWidget: (_, _, _) => Container(
             width: 180,
             height: 180,
             color: Colors.black12,
@@ -3051,10 +3049,10 @@ class _ImagePreviewPage extends StatelessWidget {
       appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
       body: Center(
         child: InteractiveViewer(
-          child: Image.network(
-            imageUrl,
+          child: CachedNetworkImage(
+            imageUrl: imageUrl,
             fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined, color: Colors.white70, size: 56),
+            errorWidget: (_, _, _) => const Icon(Icons.broken_image_outlined, color: Colors.white70, size: 56),
           ),
         ),
       ),

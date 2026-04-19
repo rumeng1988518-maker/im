@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/services/api_client.dart';
@@ -334,8 +335,8 @@ class _MomentsPageState extends State<MomentsPage> {
                 if (resolvedAvatar != null && resolvedAvatar.isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(20),
-                    child: Image.network(resolvedAvatar, width: 40, height: 40, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(
+                    child: CachedNetworkImage(imageUrl: resolvedAvatar, width: 40, height: 40, fit: BoxFit.cover,
+                      errorWidget: (_, _, _) => Container(
                         width: 40, height: 40,
                         decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), shape: BoxShape.circle),
                         child: const Icon(Icons.notifications_outlined, size: 20, color: AppColors.primary),
@@ -614,12 +615,12 @@ class _MomentsPageState extends State<MomentsPage> {
             onTap: () => _showFullImage(context, url),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: Image.network(
-                _fullUrl(url),
+              child: CachedNetworkImage(
+                imageUrl: _fullUrl(url),
                 width: size,
                 height: size,
                 fit: count == 1 ? BoxFit.contain : BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
+                errorWidget: (_, _, _) => Container(
                   width: size,
                   height: size,
                   color: const Color(0xFFF0F0F0),
@@ -647,7 +648,7 @@ class _MomentsPageState extends State<MomentsPage> {
         appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white, elevation: 0),
         body: Center(
           child: InteractiveViewer(
-            child: Image.network(_fullUrl(url), fit: BoxFit.contain),
+            child: CachedNetworkImage(imageUrl: _fullUrl(url), fit: BoxFit.contain),
           ),
         ),
       ),

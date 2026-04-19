@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
 
@@ -22,12 +23,12 @@ class UserAvatar extends StatelessWidget {
     if (resolvedUrl.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(radius),
-        child: Image.network(
-          resolvedUrl,
+        child: CachedNetworkImage(
+          imageUrl: resolvedUrl,
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _buildInitials(),
+          errorWidget: (_, _, _) => _buildInitials(),
         ),
       );
     }

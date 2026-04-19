@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/services/api_client.dart';
 import 'package:im_client/services/auth_service.dart';
@@ -255,12 +256,12 @@ class _MyMomentsPageState extends State<MyMomentsPage> {
           onTap: () => _showFullImage(url),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(4),
-            child: Image.network(
-              _fullUrl(url),
+            child: CachedNetworkImage(
+              imageUrl: _fullUrl(url),
               width: size,
               height: size,
               fit: count == 1 ? BoxFit.contain : BoxFit.cover,
-              errorBuilder: (_, _, _) => Container(
+              errorWidget: (_, _, _) => Container(
                 width: size,
                 height: size,
                 color: const Color(0xFFF0F0F0),
@@ -280,7 +281,7 @@ class _MyMomentsPageState extends State<MyMomentsPage> {
         appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white, elevation: 0),
         body: Center(
           child: InteractiveViewer(
-            child: Image.network(_fullUrl(url), fit: BoxFit.contain),
+            child: CachedNetworkImage(imageUrl: _fullUrl(url), fit: BoxFit.contain),
           ),
         ),
       ),
