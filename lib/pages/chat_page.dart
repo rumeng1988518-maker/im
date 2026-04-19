@@ -3086,33 +3086,19 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
   Future<void> _downloadAndPlay() async {
     setState(() { _downloading = true; _downloadProgress = 0; _hasError = false; _errorDetail = ''; });
     try {
-      // Android: 优先尝试直接网络播放（ExoPlayer 有更好的格式嗅探和自适应解码）
-      if (!kIsWeb && Platform.isAndroid) {
-        setState(() { _downloading = false; });
-        try {
-          final controller = VideoPlayerController.networkUrl(
-            Uri.parse(widget.videoUrl),
-          );
-          _controller = controller;
-          await controller.initialize();
-          if (!mounted) return;
-          controller.addListener(() { if (mounted) setState(() {}); });
-          setState(() {});
-          controller.play();
-          return; // 网络播放成功，直接返回
-        } catch (e) {
-          debugPrint('[VideoPreview] Android network play failed, trying download: $e');
-          _controller?.dispose();
-          _controller = null;
-          // 回退到下载播放
-          setState(() { _downloading = true; _downloadProgress = 0; });
+      // 下载视频到本地文件后播放（避免网络流超时和 iOS CoreMedia Range 问题）
+      final dir = await getTemporaryDirectory();
+      // 保留原始扩展名，ExoPlayer 需要正确扩展名来选择解码器
+      String ext = 'mp4';
+      final urlPath = Uri.parse(widget.videoUrl).path;
+      if (urlPath.contains('.')) {
+        ext = urlPath.split('.').last.toLowerCase();
+        // 只保留合法的视频扩展名
+        if (!{'mp4', 'mov', 'avi', 'mkv', '3gp', 'webm', 'm4v'}.contains(ext)) {
+          ext = 'mp4';
         }
       }
-
-      // iOS 或 Android 回退：下载到本地文件播放
-      final dir = await getTemporaryDirectory();
-      // 统一用 .mp4 扩展名，避免 .MOV 等扩展名触发不同解码路径
-      final filePath = '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final filePath = '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.$ext';
       
       await Dio().download(
         widget.videoUrl,
@@ -3128,9 +3114,19 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
       _localPath = filePath;
       setState(() { _downloading = false; });
       
-      final controller = VideoPlayerController.file(File(filePath));
+      // 优先用本地文件播放
+      var controller = VideoPlayerController.file(File(filePath));
       _controller = controller;
-      await controller.initialize();
+      try {
+        await controller.initialize();
+      } catch (e) {
+        debugPrint('[VideoPreview] file play failed: $e, trying network fallback');
+        controller.dispose();
+        // 本地文件播放失败时回退到网络流（ExoPlayer 网络模式有更好的格式嗅探）
+        controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+        _controller = controller;
+        await controller.initialize();
+      }
       if (!mounted) return;
       controller.addListener(() {
         if (mounted) setState(() {});
