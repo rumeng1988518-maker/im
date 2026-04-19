@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_app_badger/flutter_app_badger.dart';
 import 'dart:io' show Platform;
 
 /// 来电通知固定 ID，方便取消
@@ -113,6 +112,7 @@ class NotificationService {
       priority: Priority.high,
       enableVibration: true,
       playSound: true,
+      channelShowBadge: true,
     );
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
@@ -228,30 +228,21 @@ class NotificationService {
   Future<void> updateBadge(int count) async {
     if (!_initialized) return;
     try {
-      // 方案一：flutter_app_badger — 适配国产安卓启动器（小米/华为/OPPO/vivo/三星等）
-      if (!kIsWeb) {
-        try {
-          final supported = await FlutterAppBadger.isAppBadgeSupported();
-          if (supported) {
-            FlutterAppBadger.updateBadgeCount(count);
-          }
-        } catch (_) {}
-      }
-
-      // 方案二：通过通知的 number 属性设置角标（部分启动器需要）
+      // 通过通知的 number 属性 + channelShowBadge 设置角标
+      // 国产启动器(小米/华为/OPPO/vivo)需要 channelShowBadge=true + 可见的通知
       final androidDetails = AndroidNotificationDetails(
         'im_badge',
         '未读消息角标',
         channelDescription: '用于显示桌面图标未读数量',
-        importance: Importance.min,
-        priority: Priority.min,
+        importance: Importance.low,
+        priority: Priority.low,
         number: count,
         showWhen: false,
         playSound: false,
         enableVibration: false,
         ongoing: false,
         onlyAlertOnce: true,
-        visibility: NotificationVisibility.secret,
+        channelShowBadge: true,
       );
       final iosDetails = DarwinNotificationDetails(
         presentAlert: false,
@@ -273,13 +264,6 @@ class NotificationService {
   Future<void> clearBadge() async {
     if (!_initialized) return;
     try {
-      // flutter_app_badger 清除角标
-      if (!kIsWeb) {
-        try {
-          FlutterAppBadger.removeBadge();
-        } catch (_) {}
-      }
-
       // 取消角标通知和所有消息通知（保留 keepAlive 和 call 通知）
       final activeNotifications = await _plugin.getActiveNotifications();
       for (final n in activeNotifications) {
