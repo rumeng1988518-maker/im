@@ -822,36 +822,6 @@ class ChatProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('[ChatProvider] pollAndNotify error: $e');
     } finally {
-      _polling = false
-          } catch (_) {}
-        }
-      }
-      if (hasNewMessage) {
-        try { NotificationSound.play(); } catch (_) {}
-      }
-
-      // 更新本地会话列表（取较大未读数）
-      for (final sc in serverConvs) {
-        final id = sc['conversationId']?.toString();
-        if (id == null) continue;
-        final idx = _conversations.indexWhere((c) => c['conversationId']?.toString() == id);
-        if (idx >= 0) {
-          final localUnread = (_conversations[idx]['unreadCount'] as num?)?.toInt() ?? 0;
-          final serverUnread = (sc['unreadCount'] as num?)?.toInt() ?? 0;
-          _conversations[idx]['lastMessage'] = sc['lastMessage'];
-          _conversations[idx]['updatedAt'] = sc['updatedAt'];
-          if (serverUnread > localUnread) {
-            _conversations[idx]['unreadCount'] = serverUnread;
-          }
-        } else {
-          _conversations.add(sc);
-        }
-      }
-      _sortConversations();
-      notifyListeners();
-    } catch (e) {
-      debugPrint('[ChatProvider] pollAndNotify error: $e');
-    } finally {
       _polling = false;
     }
   }
