@@ -58,6 +58,8 @@ class _ChatPageState extends State<ChatPage> {
   String? _lastCallId;
   bool _typingSent = false;
   Timer? _typingStopTimer;
+  bool _loadingMore = false;
+  bool _hasMoreHistory = true;
 
   // Voice recording
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -79,6 +81,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _voiceCompleteSub = _audioPlayer.onPlayerComplete.listen((_) {
       _clearVoicePlayState();
     });
@@ -119,8 +122,47 @@ class _ChatPageState extends State<ChatPage> {
     _audioPlayer.dispose();
     _stopTyping(force: true);
     _inputController.dispose();
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    // 滚动到顶部附近时加载更多历史消息
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels < 100 &&
+        !_loadingMore &&
+        _hasMoreHistory) {
+      _loadOlderMessages();
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_loadingMore || !_hasMoreHistory) return;
+    setState(() => _loadingMore = true);
+
+    final chat = context.read<ChatProvider>();
+    // 记住当前滚动位置和内容高度，以便加载后保持视觉位置
+    final oldMaxExtent = _scrollController.position.maxScrollExtent;
+
+    final count = await chat.loadMoreMessages(widget.conversationId);
+    if (count == 0) {
+      if (mounted) setState(() { _hasMoreHistory = false; _loadingMore = false; });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _loadingMore = false);
+
+    // 等待布局完成后恢复滚动位置
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final newMaxExtent = _scrollController.position.maxScrollExtent;
+      final diff = newMaxExtent - oldMaxExtent;
+      if (diff > 0) {
+        _scrollController.jumpTo(_scrollController.position.pixels + diff);
+      }
+    });
   }
 
   void _onInputChanged(String value) {
@@ -1333,12 +1375,25 @@ class _ChatPageState extends State<ChatPage> {
 
                   _handleMessagesUpdated(msgs);
 
+                  final headerCount = (_loadingMore || !_hasMoreHistory ? 1 : 0) + (notice.isNotEmpty ? 1 : 0);
                   return ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    itemCount: msgs.length + (notice.isNotEmpty ? 1 : 0),
+                    itemCount: msgs.length + headerCount,
                     itemBuilder: (context, index) {
-                      if (notice.isNotEmpty && index == 0) {
+                      // 加载更多指示器
+                      if (index == 0 && (_loadingMore || !_hasMoreHistory)) {
+                        return Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: _loadingMore
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : Text('没有更多消息了', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                          ),
+                        );
+                      }
+                      final adjustedIndex = index - (_loadingMore || !_hasMoreHistory ? 1 : 0);
+                      if (notice.isNotEmpty && adjustedIndex == 0) {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1363,7 +1418,7 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                         );
                       }
-                      final msgIndex = notice.isNotEmpty ? index - 1 : index;
+                      final msgIndex = adjustedIndex - (notice.isNotEmpty ? 1 : 0);
                       return _buildMessage(context, msgs, msgIndex);
                     },
                   );
@@ -3016,19 +3071,39 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
   VideoPlayerController? _controller;
   bool _hasError = false;
   String _errorDetail = '';
+  bool _downloading = false;
+  double _downloadProgress = 0;
+  String? _localPath;
 
   @override
   void initState() {
     super.initState();
-    _initPlayer();
+    _downloadAndPlay();
   }
 
-  Future<void> _initPlayer() async {
+  Future<void> _downloadAndPlay() async {
+    setState(() { _downloading = true; _downloadProgress = 0; _hasError = false; _errorDetail = ''; });
     try {
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(widget.videoUrl),
-        httpHeaders: const {'Accept': '*/*'},
+      // 先下载视频到临时文件，避免 iOS CoreMedia 对 Range 请求的要求
+      final dir = await getTemporaryDirectory();
+      final ext = widget.videoUrl.contains('.') ? widget.videoUrl.split('.').last.split('?').first : 'mp4';
+      final filePath = '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      
+      await Dio().download(
+        widget.videoUrl,
+        filePath,
+        onReceiveProgress: (received, total) {
+          if (total > 0 && mounted) {
+            setState(() { _downloadProgress = received / total; });
+          }
+        },
       );
+      
+      if (!mounted) return;
+      _localPath = filePath;
+      setState(() { _downloading = false; });
+      
+      final controller = VideoPlayerController.file(File(filePath));
       _controller = controller;
       await controller.initialize();
       if (!mounted) return;
@@ -3038,9 +3113,10 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
       setState(() {});
       controller.play();
     } catch (e) {
-      debugPrint('[VideoPreview] init error: $e');
+      debugPrint('[VideoPreview] download/init error: $e');
       if (mounted) {
         setState(() {
+          _downloading = false;
           _hasError = true;
           _errorDetail = e.toString();
         });
@@ -3083,7 +3159,26 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
         ],
       ),
       body: Center(
-        child: _hasError
+        child: _downloading
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 60, height: 60,
+                    child: CircularProgressIndicator(
+                      value: _downloadProgress > 0 ? _downloadProgress : null,
+                      color: Colors.white70,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _downloadProgress > 0 ? '${(_downloadProgress * 100).toInt()}%' : '加载中...',
+                    style: const TextStyle(color: Colors.white54, fontSize: 14),
+                  ),
+                ],
+              )
+            : _hasError
             ? Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -3100,9 +3195,9 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
                   const SizedBox(height: 20),
                   TextButton.icon(
                     onPressed: () {
-                      setState(() { _hasError = false; _errorDetail = ''; });
                       _controller?.dispose();
-                      _initPlayer();
+                      _controller = null;
+                      _downloadAndPlay();
                     },
                     icon: const Icon(Icons.refresh, color: Colors.white70),
                     label: const Text('重试', style: TextStyle(color: Colors.white70)),

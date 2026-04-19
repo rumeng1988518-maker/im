@@ -250,12 +250,45 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> loadMessages(String convId) async {
     try {
-      final data = await api.get('/messages', params: {'conversationId': convId});
+      final data = await api.get('/messages', params: {'conversationId': convId, 'limit': 50});
       final list = List<Map<String, dynamic>>.from(data is List ? data : (data?['list'] ?? []));
       _messages[convId] = list;
       notifyListeners();
     } catch (e) {
       rethrow;
+    }
+  }
+
+  /// 加载更早的历史消息（分页），返回加载的条数（0 表示没有更多）
+  Future<int> loadMoreMessages(String convId) async {
+    final existing = _messages[convId];
+    if (existing == null || existing.isEmpty) return 0;
+
+    // 取当前最早消息的 seq 作为游标
+    final firstMsg = existing.first;
+    final beforeSeq = firstMsg['seq'];
+    if (beforeSeq == null) return 0;
+
+    try {
+      final data = await api.get('/messages', params: {
+        'conversationId': convId,
+        'beforeSeq': beforeSeq,
+        'limit': 50,
+      });
+      final older = List<Map<String, dynamic>>.from(data is List ? data : (data?['list'] ?? []));
+      if (older.isEmpty) return 0;
+
+      // 去重：排除 seq 已存在的消息
+      final existingSeqs = existing.map((m) => m['seq']).toSet();
+      final newMsgs = older.where((m) => !existingSeqs.contains(m['seq'])).toList();
+      if (newMsgs.isEmpty) return 0;
+
+      _messages[convId] = [...newMsgs, ...existing];
+      notifyListeners();
+      return newMsgs.length;
+    } catch (e) {
+      debugPrint('[ChatProvider] loadMoreMessages error: $e');
+      return 0;
     }
   }
 
