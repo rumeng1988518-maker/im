@@ -21,9 +21,9 @@ class ForegroundService {
     if (Platform.isAndroid) {
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
-          channelId: 'im_foreground',
-          channelName: 'Background Service',
-          channelDescription: 'Keep message connection alive',
+          channelId: 'im_foreground_v2',
+          channelName: '内部通IM后台服务',
+          channelDescription: '内部通IM持续运行中',
           channelImportance: NotificationChannelImportance.LOW,
           priority: NotificationPriority.LOW,
         ),
@@ -58,8 +58,8 @@ class ForegroundService {
         if (await FlutterForegroundTask.isRunningService) return;
         await FlutterForegroundTask.startService(
           serviceId: 256,
-          notificationTitle: 'IM',
-          notificationText: 'Keeping connection alive',
+          notificationTitle: '内部通IM',
+          notificationText: '内部通IM 持续运行中',
           callback: _startCallback,
         );
         debugPrint('[ForegroundService] Android service started');

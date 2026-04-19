@@ -580,13 +580,8 @@ class ChatProvider extends ChangeNotifier {
       _sortConversations();
     }
 
-    // 如果用户正在查看该会话，自动标记已读
-    if (_currentConvId == convId) {
-      final msgId = msg['messageId']?.toString();
-      if (msgId != null) {
-        markMessageRead(convId, msgId);
-      }
-    }
+    // 已读标记由 ChatPage UI 层（_markLatestIncomingAsRead）在消息可见时触发，
+    // 这里不再自动标记，避免用户未实际查看就发送已读回执
 
     // 延迟同步服务端数据（避免连续消息导致竞态覆盖本地未读数）
     _debouncedLoadConversations();
