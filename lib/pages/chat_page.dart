@@ -128,9 +128,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onScroll() {
-    // 滚动到顶部附近时加载更多历史消息
+    // reverse ListView: pixels=0 在底部, maxScrollExtent 在顶部
+    // 滚动到顶部（即 pixels 接近 maxScrollExtent）时加载更多历史消息
     if (_scrollController.hasClients &&
-        _scrollController.position.pixels < 100 &&
+        _scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent - 100 &&
         !_loadingMore &&
         _hasMoreHistory) {
       _loadOlderMessages();
@@ -142,8 +144,6 @@ class _ChatPageState extends State<ChatPage> {
     setState(() => _loadingMore = true);
 
     final chat = context.read<ChatProvider>();
-    // 记住当前滚动位置和内容高度，以便加载后保持视觉位置
-    final oldMaxExtent = _scrollController.position.maxScrollExtent;
 
     final count = await chat.loadMoreMessages(widget.conversationId);
     if (count == 0) {
@@ -153,16 +153,7 @@ class _ChatPageState extends State<ChatPage> {
 
     if (!mounted) return;
     setState(() => _loadingMore = false);
-
-    // 等待布局完成后恢复滚动位置
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      final newMaxExtent = _scrollController.position.maxScrollExtent;
-      final diff = newMaxExtent - oldMaxExtent;
-      if (diff > 0) {
-        _scrollController.jumpTo(_scrollController.position.pixels + diff);
-      }
-    });
+    // reverse ListView 自动保持视觉位置，无需手动调整
   }
 
   void _onInputChanged(String value) {
@@ -198,7 +189,7 @@ class _ChatPageState extends State<ChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
+          0, // reverse ListView: 0 = bottom
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
@@ -1375,25 +1366,28 @@ class _ChatPageState extends State<ChatPage> {
 
                   _handleMessagesUpdated(msgs);
 
-                  final headerCount = (_loadingMore || !_hasMoreHistory ? 1 : 0) + (notice.isNotEmpty ? 1 : 0);
+                  final footerCount = (_loadingMore || !_hasMoreHistory ? 1 : 0) + (notice.isNotEmpty ? 1 : 0);
+                  final totalCount = msgs.length + footerCount;
                   return ListView.builder(
                     controller: _scrollController,
+                    reverse: true,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    itemCount: msgs.length + headerCount,
+                    itemCount: totalCount,
                     itemBuilder: (context, index) {
-                      // 加载更多指示器
-                      if (index == 0 && (_loadingMore || !_hasMoreHistory)) {
-                        return Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: _loadingMore
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                : Text('没有更多消息了', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
-                          ),
-                        );
+                      // reverse 列表中 index=0 是最新消息（底部），index 越大越旧（顶部）
+                      // 消息占 0..(msgs.length-1)，footer 占 msgs.length..(totalCount-1)
+
+                      // 消息区域：index 0..msgs.length-1 → 反向映射到 msgs
+                      if (index < msgs.length) {
+                        final msgIndex = msgs.length - 1 - index;
+                        return _buildMessage(context, msgs, msgIndex);
                       }
-                      final adjustedIndex = index - (_loadingMore || !_hasMoreHistory ? 1 : 0);
-                      if (notice.isNotEmpty && adjustedIndex == 0) {
+
+                      // footer 区域（顶部）
+                      final footerIndex = index - msgs.length;
+
+                      // 群公告（紧贴消息列表顶部）
+                      if (notice.isNotEmpty && footerIndex == 0) {
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1418,8 +1412,16 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                         );
                       }
-                      final msgIndex = adjustedIndex - (notice.isNotEmpty ? 1 : 0);
-                      return _buildMessage(context, msgs, msgIndex);
+
+                      // 加载更多指示器（最顶部）
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: _loadingMore
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                              : Text('没有更多消息了', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                        ),
+                      );
                     },
                   );
                 },
