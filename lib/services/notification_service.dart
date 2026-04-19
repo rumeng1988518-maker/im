@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_app_badger/flutter_app_badger.dart';
+import 'dart:io' show Platform;
 
 /// 来电通知固定 ID，方便取消
 const int _callNotificationId = 99999;
@@ -226,8 +228,17 @@ class NotificationService {
   Future<void> updateBadge(int count) async {
     if (!_initialized) return;
     try {
-      // Android: 通过一条静默通知的 number 属性设置角标数字
-      // 大多数 Android 启动器（Samsung/Xiaomi/Huawei/OPPO）会读取 number 显示角标
+      // 方案一：flutter_app_badger — 适配国产安卓启动器（小米/华为/OPPO/vivo/三星等）
+      if (!kIsWeb) {
+        try {
+          final supported = await FlutterAppBadger.isAppBadgeSupported();
+          if (supported) {
+            FlutterAppBadger.updateBadgeCount(count);
+          }
+        } catch (_) {}
+      }
+
+      // 方案二：通过通知的 number 属性设置角标（部分启动器需要）
       final androidDetails = AndroidNotificationDetails(
         'im_badge',
         '未读消息角标',
@@ -240,7 +251,6 @@ class NotificationService {
         enableVibration: false,
         ongoing: false,
         onlyAlertOnce: true,
-        // 使通知几乎不可见但角标仍然生效
         visibility: NotificationVisibility.secret,
       );
       final iosDetails = DarwinNotificationDetails(
@@ -263,20 +273,24 @@ class NotificationService {
   Future<void> clearBadge() async {
     if (!_initialized) return;
     try {
+      // flutter_app_badger 清除角标
+      if (!kIsWeb) {
+        try {
+          FlutterAppBadger.removeBadge();
+        } catch (_) {}
+      }
+
       // 取消角标通知和所有消息通知（保留 keepAlive 和 call 通知）
-      // cancelAll 会清除所有通知，之后重新显示 keepAlive（如有需要）
       final activeNotifications = await _plugin.getActiveNotifications();
       for (final n in activeNotifications) {
         final id = n.id;
         if (id == null) continue;
-        // 保留 keepAlive 和 call 通知
         if (id == keepAliveNotificationId || id == _callNotificationId) continue;
         await _plugin.cancel(id);
       }
 
       // iOS 额外清除角标
-      final iosPlugin = _plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
-      if (iosPlugin != null) {
+      if (!kIsWeb && Platform.isIOS) {
         await _plugin.show(
           _badgeNotificationId,
           null,
