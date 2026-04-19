@@ -41,7 +41,7 @@ void main() async {
   if (auth.isLoggedIn) {
     try {
       final api = ApiClient(auth, baseUrl: AppConfig.baseUrl);
-      await api.get('/users/profile');
+      await api.get('/users/me');
     } catch (_) {
       // ApiClient 拦截器会在 token 失效(40101/40102/40103)时自动 logout
       // 网络超时等非认证错误不清除登录态，保留离线可用性
@@ -86,8 +86,9 @@ class _IMAppState extends State<IMApp> {
       ForegroundService.requestBatteryOptimization();
       // 上报 push token（iOS APNs / Android FCM）
       _uploadPushToken();
-      // 监听 FCM token 刷新
+      // 监听 token 刷新/延迟到达（Android FCM refresh + iOS native push）
       PushTokenService.onTokenRefresh((newToken) {
+        debugPrint('[Push] Token refresh/arrived: ${newToken.substring(0, 8)}...');
         _uploadPushTokenWithValue(newToken);
       });
     }
@@ -98,6 +99,8 @@ class _IMAppState extends State<IMApp> {
       final pushToken = await PushTokenService.getToken();
       if (pushToken != null && pushToken.isNotEmpty) {
         await _uploadPushTokenWithValue(pushToken);
+      } else {
+        debugPrint('[Push] No push token available, will rely on onTokenRefresh callback');
       }
     } catch (e) {
       debugPrint('[Push] Upload push token error: $e');

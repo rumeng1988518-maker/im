@@ -8,6 +8,7 @@ import 'package:im_client/utils/app_toast.dart';
 import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/pages/landing_page.dart';
 import 'package:im_client/services/push_token_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -171,12 +172,41 @@ class _SettingsPageState extends State<SettingsPage> {
             actions: [
               TextButton(
                 onPressed: () async {
+                  setDialogState(() => info = '正在重新获取并上报 Token...');
+                  try {
+                    final token = await PushTokenService.getToken();
+                    if (token == null || token.isEmpty) {
+                      setDialogState(() => info = 'Token 获取失败（系统未返回 APNs token）\n\n请检查:\n1. 是否允许了通知权限\n2. 网络是否正常\n3. 证书配置是否正确');
+                      return;
+                    }
+                    final prefs = await SharedPreferences.getInstance();
+                    String? deviceId = prefs.getString('im_device_id');
+                    if (deviceId == null || deviceId.isEmpty) {
+                      deviceId = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+                      await prefs.setString('im_device_id', deviceId);
+                    }
+                    await api.put('/users/me/push-token', data: {
+                      'pushToken': token,
+                      'deviceId': deviceId,
+                      'platform': PushTokenService.platform,
+                    });
+                    // 重新获取状态
+                    final newStatus = await _fetchPushStatus(api);
+                    if (ctx.mounted) setDialogState(() => info = '上报成功！Token: ${token.substring(0, 12)}...\n\n$newStatus');
+                  } catch (e) {
+                    if (ctx.mounted) setDialogState(() => info = '上报失败: $e');
+                  }
+                },
+                child: const Text('重新上报Token'),
+              ),
+              TextButton(
+                onPressed: () async {
                   setDialogState(() => info = '正在发送测试推送...');
                   try {
                     final res = await api.post('/debug/push-test');
                     final results = res['results'] as List? ?? [];
                     if (results.isEmpty) {
-                      setDialogState(() => info = '没有可用的推送设备（push_token 为空）');
+                      setDialogState(() => info = '没有可用的推送设备（push_token 为空）\n\n请先点击「重新上报Token」');
                     } else {
                       final buf = StringBuffer('测试推送已发送:\n');
                       for (final r in results) {

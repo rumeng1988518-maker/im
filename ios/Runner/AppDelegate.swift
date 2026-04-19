@@ -6,6 +6,7 @@ import UserNotifications
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var deviceToken: String?
   private var pendingTokenResult: FlutterResult?
+  private var pushChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -14,13 +15,17 @@ import UserNotifications
     // Register push method channel
     if let controller = window?.rootViewController as? FlutterViewController {
       let channel = FlutterMethodChannel(name: "im.client/push", binaryMessenger: controller.binaryMessenger)
+      self.pushChannel = channel
       channel.setMethodCallHandler { [weak self] (call, result) in
         if call.method == "getDeviceToken" {
           if let token = self?.deviceToken {
+            print("[APNs] getDeviceToken: returning cached token \(token.prefix(8))...")
             result(token)
           } else {
+            print("[APNs] getDeviceToken: no token yet, requesting authorization...")
             self?.pendingTokenResult = result
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+              print("[APNs] Authorization result: granted=\(granted), error=\(String(describing: error))")
               if granted {
                 DispatchQueue.main.async {
                   UIApplication.shared.registerForRemoteNotifications()
@@ -35,6 +40,7 @@ import UserNotifications
             // Timeout after 10 seconds
             DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
               if let pending = self?.pendingTokenResult {
+                print("[APNs] getDeviceToken: 10s timeout, token=\(self?.deviceToken?.prefix(8) ?? "nil")")
                 pending(self?.deviceToken)
                 self?.pendingTokenResult = nil
               }
@@ -48,6 +54,7 @@ import UserNotifications
 
     // Request notification permission and register
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+      print("[APNs] Initial authorization: granted=\(granted)")
       if granted {
         DispatchQueue.main.async {
           UIApplication.shared.registerForRemoteNotifications()
@@ -67,6 +74,8 @@ import UserNotifications
       pending(token)
       pendingTokenResult = nil
     }
+    // Proactively notify Flutter when token arrives (even if no pending request)
+    pushChannel?.invokeMethod("onTokenReceived", arguments: token)
   }
 
   override func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
