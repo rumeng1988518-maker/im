@@ -16,6 +16,7 @@ import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:open_file/open_file.dart';
 import 'package:im_client/config/app_config.dart';
 import 'package:im_client/config/theme.dart';
 import 'package:im_client/providers/chat_provider.dart';
@@ -3077,70 +3078,96 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
   double _downloadProgress = 0;
   String? _localPath;
 
+  /// 全局视频文件缓存：URL → 本地文件路径（同一会话内不重复下载）
+  static final Map<String, String> _videoCache = {};
+
   @override
   void initState() {
     super.initState();
-    _downloadAndPlay();
+    _loadAndPlay();
   }
 
-  Future<void> _downloadAndPlay() async {
+  /// 从 URL 生成稳定的缓存文件名
+  String _cacheFileName(String url) {
+    final urlPath = Uri.parse(url).path;
+    String ext = 'mp4';
+    if (urlPath.contains('.')) {
+      final e = urlPath.split('.').last.toLowerCase();
+      if ({'mp4', 'mov', 'avi', 'mkv', '3gp', 'webm', 'm4v'}.contains(e)) ext = e;
+    }
+    // 用 URL 的 hashCode 作为文件名（简单且足够避免冲突）
+    final hash = url.hashCode.toUnsigned(32).toRadixString(16);
+    return 'video_$hash.$ext';
+  }
+
+  Future<void> _loadAndPlay() async {
     setState(() { _downloading = true; _downloadProgress = 0; _hasError = false; _errorDetail = ''; });
     try {
-      // 下载视频到本地文件后播放（避免网络流超时和 iOS CoreMedia Range 问题）
       final dir = await getTemporaryDirectory();
-      // 保留原始扩展名，ExoPlayer 需要正确扩展名来选择解码器
-      String ext = 'mp4';
-      final urlPath = Uri.parse(widget.videoUrl).path;
-      if (urlPath.contains('.')) {
-        ext = urlPath.split('.').last.toLowerCase();
-        // 只保留合法的视频扩展名
-        if (!{'mp4', 'mov', 'avi', 'mkv', '3gp', 'webm', 'm4v'}.contains(ext)) {
-          ext = 'mp4';
+      final fileName = _cacheFileName(widget.videoUrl);
+      final filePath = '${dir.path}/$fileName';
+      final file = File(filePath);
+
+      // 检查缓存：文件存在且大于 1KB 才认为有效
+      if (_videoCache.containsKey(widget.videoUrl) && file.existsSync() && file.lengthSync() > 1024) {
+        _localPath = filePath;
+        setState(() { _downloading = false; });
+      } else {
+        // 下载视频
+        await Dio().download(
+          widget.videoUrl,
+          filePath,
+          onReceiveProgress: (received, total) {
+            if (total > 0 && mounted) {
+              setState(() { _downloadProgress = received / total; });
+            }
+          },
+        );
+        if (!mounted) return;
+
+        // 校验下载的文件
+        final downloadedFile = File(filePath);
+        if (!downloadedFile.existsSync() || downloadedFile.lengthSync() < 1024) {
+          throw Exception('下载的文件无效（${downloadedFile.existsSync() ? "${downloadedFile.lengthSync()} bytes" : "不存在"})');
         }
+
+        _localPath = filePath;
+        _videoCache[widget.videoUrl] = filePath;
+        setState(() { _downloading = false; });
       }
-      final filePath = '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.$ext';
-      
-      await Dio().download(
-        widget.videoUrl,
-        filePath,
-        onReceiveProgress: (received, total) {
-          if (total > 0 && mounted) {
-            setState(() { _downloadProgress = received / total; });
-          }
-        },
-      );
-      
-      if (!mounted) return;
-      _localPath = filePath;
-      setState(() { _downloading = false; });
-      
-      // 优先用本地文件播放
-      var controller = VideoPlayerController.file(File(filePath));
+
+      // 初始化播放器
+      final controller = VideoPlayerController.file(File(_localPath!));
       _controller = controller;
-      try {
-        await controller.initialize();
-      } catch (e) {
-        debugPrint('[VideoPreview] file play failed: $e, trying network fallback');
-        controller.dispose();
-        // 本地文件播放失败时回退到网络流（ExoPlayer 网络模式有更好的格式嗅探）
-        controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
-        _controller = controller;
-        await controller.initialize();
-      }
+      await controller.initialize();
       if (!mounted) return;
-      controller.addListener(() {
-        if (mounted) setState(() {});
-      });
+      controller.addListener(() { if (mounted) setState(() {}); });
       setState(() {});
       controller.play();
     } catch (e) {
-      debugPrint('[VideoPreview] download/init error: $e');
+      debugPrint('[VideoPreview] error: $e');
+      final errStr = e.toString();
+      // ExoPlayer Source error 或 MediaCodec error → 用系统播放器打开
+      if (!kIsWeb && _localPath != null &&
+          (errStr.contains('Source error') || errStr.contains('MediaCodec') || errStr.contains('ExoPlayback'))) {
+        debugPrint('[VideoPreview] Falling back to system player');
+        try {
+          final uri = Uri.file(_localPath!);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri);
+            if (mounted) Navigator.of(context).pop();
+            return;
+          }
+        } catch (_) {}
+        // canLaunchUrl 失败时试 OpenFile
+        try {
+          await OpenFile.open(_localPath!);
+          if (mounted) Navigator.of(context).pop();
+          return;
+        } catch (_) {}
+      }
       if (mounted) {
-        setState(() {
-          _downloading = false;
-          _hasError = true;
-          _errorDetail = e.toString();
-        });
+        setState(() { _downloading = false; _hasError = true; _errorDetail = errStr; });
       }
     }
   }
@@ -3218,7 +3245,13 @@ class _VideoPreviewPageState extends State<_VideoPreviewPage> {
                     onPressed: () {
                       _controller?.dispose();
                       _controller = null;
-                      _downloadAndPlay();
+                      // 重试时清除该 URL 的缓存
+                      _videoCache.remove(widget.videoUrl);
+                      if (_localPath != null) {
+                        try { File(_localPath!).deleteSync(); } catch (_) {}
+                      }
+                      _localPath = null;
+                      _loadAndPlay();
                     },
                     icon: const Icon(Icons.refresh, color: Colors.white70),
                     label: const Text('重试', style: TextStyle(color: Colors.white70)),
