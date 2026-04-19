@@ -109,9 +109,6 @@ import UserNotifications
     completionHandler(.newData)
   }
 
-  // Clear badge when app becomes active
-  override func applicationDidBecomeActive(_ application: UIApplication) {
-    application.applicationIconBadgeNumber = 0
-    UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-  }
+  // Badge clearing is now controlled by Flutter (ChatProvider._updateAppBadge)
+  // Do NOT clear badge/notifications here — user may not have read them yet
 }

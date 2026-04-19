@@ -309,15 +309,10 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
       if (!socket.isConnected) {
         debugPrint('[KeepAlive] socket disconnected, reconnecting...');
         socket.ensureConnected(token);
-        // 如果连不上，通过 API 轮询会话列表（确保不丢消息、通知和角标）
-        Future.delayed(const Duration(seconds: 3), () {
-          if (!socket.isConnected) {
-            debugPrint('[KeepAlive] still disconnected, polling via API...');
-            try {
-              context.read<ChatProvider>().pollAndNotify().catchError((_) {});
-            } catch (_) {}
-          }
-        });
+      }
+      // iOS 没有 APNs 推送，每次心跳都通过 API 轮询确保不丢消息和角标
+      if (!kIsWeb && Platform.isIOS) {
+        context.read<ChatProvider>().pollAndNotify().catchError((_) {});
       }
     } catch (_) {}
   }
@@ -343,10 +338,9 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
           socket.emit('user:foreground', {});
         }
       } catch (_) {}
-      // 回到前台：停止前台服务
-      ForegroundService.stop();
-      // 恢复 WebSocket 连接并刷新数据
+      // 先恢复连接和数据，再停止后台保活
       _reconnectAndRefresh();
+      ForegroundService.stop();
     }
   }
 

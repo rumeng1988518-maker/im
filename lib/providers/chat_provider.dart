@@ -739,7 +739,10 @@ class ChatProvider extends ChangeNotifier {
   }
 
   /// 后台轮询：获取会话列表，如果发现未读数增加，弹本地通知
+  bool _polling = false;
   Future<void> pollAndNotify() async {
+    if (_polling) return; // 防止重入
+    _polling = true;
     try {
       // 记录轮询前每个会话的未读数
       final oldUnread = <String, int>{};
@@ -750,17 +753,20 @@ class ChatProvider extends ChangeNotifier {
         }
       }
 
-      await loadConversations();
+      // 直接从服务端获取最新会话列表（不走 loadConversations 的合并逻辑）
+      final data = await api.get('/conversations', params: {'page': 1, 'pageSize': 100});
+      final serverConvs = List<Map<String, dynamic>>.from(data?['list'] ?? data ?? []);
 
-      // 对比轮询后的未读数，对增加的会话弹通知
+      // 对比未读数，对增加的会话弹通知
       final ns = NotificationService();
-      for (final c in _conversations) {
+      bool hasNewMessage = false;
+      for (final c in serverConvs) {
         final id = c['conversationId']?.toString();
         if (id == null || id == _currentConvId) continue;
         final newUnread = (c['unreadCount'] as num?)?.toInt() ?? 0;
         final prevUnread = oldUnread[id] ?? 0;
         if (newUnread > prevUnread) {
-          // 有新消息，弹本地通知
+          hasNewMessage = true;
           final lastMsg = c['lastMessage'] as Map<String, dynamic>?;
           final convName = c['name']?.toString() ?? c['targetNickname']?.toString() ?? '新消息';
           String body = '你收到 ${newUnread - prevUnread} 条新消息';
@@ -782,7 +788,6 @@ class ChatProvider extends ChangeNotifier {
             }
           }
           try {
-            NotificationSound.play();
             ns.showMessageNotification(
               senderName: convName,
               body: body,
@@ -791,8 +796,63 @@ class ChatProvider extends ChangeNotifier {
           } catch (_) {}
         }
       }
+      if (hasNewMessage) {
+        try { NotificationSound.play(); } catch (_) {}
+      }
+
+      // 更新本地会话列表（取较大未读数）
+      for (final sc in serverConvs) {
+        final id = sc['conversationId']?.toString();
+        if (id == null) continue;
+        final idx = _conversations.indexWhere((c) => c['conversationId']?.toString() == id);
+        if (idx >= 0) {
+          final localUnread = (_conversations[idx]['unreadCount'] as num?)?.toInt() ?? 0;
+          final serverUnread = (sc['unreadCount'] as num?)?.toInt() ?? 0;
+          _conversations[idx]['lastMessage'] = sc['lastMessage'];
+          _conversations[idx]['updatedAt'] = sc['updatedAt'];
+          if (serverUnread > localUnread) {
+            _conversations[idx]['unreadCount'] = serverUnread;
+          }
+        } else {
+          _conversations.add(sc);
+        }
+      }
+      _sortConversations();
+      notifyListeners();
     } catch (e) {
       debugPrint('[ChatProvider] pollAndNotify error: $e');
+    } finally {
+      _polling = false
+          } catch (_) {}
+        }
+      }
+      if (hasNewMessage) {
+        try { NotificationSound.play(); } catch (_) {}
+      }
+
+      // 更新本地会话列表（取较大未读数）
+      for (final sc in serverConvs) {
+        final id = sc['conversationId']?.toString();
+        if (id == null) continue;
+        final idx = _conversations.indexWhere((c) => c['conversationId']?.toString() == id);
+        if (idx >= 0) {
+          final localUnread = (_conversations[idx]['unreadCount'] as num?)?.toInt() ?? 0;
+          final serverUnread = (sc['unreadCount'] as num?)?.toInt() ?? 0;
+          _conversations[idx]['lastMessage'] = sc['lastMessage'];
+          _conversations[idx]['updatedAt'] = sc['updatedAt'];
+          if (serverUnread > localUnread) {
+            _conversations[idx]['unreadCount'] = serverUnread;
+          }
+        } else {
+          _conversations.add(sc);
+        }
+      }
+      _sortConversations();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[ChatProvider] pollAndNotify error: $e');
+    } finally {
+      _polling = false;
     }
   }
 
