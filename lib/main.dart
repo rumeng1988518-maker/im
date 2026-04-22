@@ -24,6 +24,10 @@ import 'package:firebase_core/firebase_core.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 顺序探活备用服务器，选第一个可达的地址（5s 超时）
+  await AppConfig.resolveHost();
+
   // Initialize Firebase for Android FCM
   if (!kIsWeb && Platform.isAndroid) {
     try {

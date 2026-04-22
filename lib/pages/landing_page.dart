@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:im_client/config/app_config.dart';
 import 'package:im_client/pages/login_page.dart';
 
 class LandingPage extends StatefulWidget {
@@ -77,6 +78,11 @@ class _LandingPageState extends State<LandingPage> with TickerProviderStateMixin
                     ),
 
                     const SizedBox(height: 50),
+
+                    // 线路状态
+                    _NetworkLineIndicator(),
+
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),
@@ -191,5 +197,50 @@ class _SlidingGradientTransform extends GradientTransform {
   @override
   Matrix4? transform(Rect bounds, {TextDirection? textDirection}) {
     return Matrix4.translationValues(bounds.width * slidePercent, 0, 0);
+  }
+}
+
+class _NetworkLineIndicator extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final idx = AppConfig.resolvedLineIndex;
+    final ms = AppConfig.resolvedLatencyMs;
+
+    // 调试模式或探活未完成时不显示
+    if (idx <= 0 || ms < 0) return const SizedBox.shrink();
+
+    // 根据延迟决定颜色：< 100ms 绿，100~300ms 橙，> 300ms 红
+    final Color dotColor;
+    if (ms < 100) {
+      dotColor = const Color(0xFF34D399); // 绿
+    } else if (ms < 300) {
+      dotColor = const Color(0xFFFBBF24); // 橙
+    } else {
+      dotColor = const Color(0xFFF87171); // 红
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: dotColor,
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: dotColor.withValues(alpha: 0.6), blurRadius: 4)],
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '线路$idx：${ms}ms',
+          style: const TextStyle(
+            fontSize: 12,
+            color: Color(0xFFB0B8C8),
+            letterSpacing: 0.5,
+          ),
+        ),
+      ],
+    );
   }
 }
