@@ -1,6 +1,6 @@
 String formatTime(String? dateStr) {
   if (dateStr == null || dateStr.isEmpty) return '';
-  final d = DateTime.tryParse(dateStr);
+  final d = DateTime.tryParse(dateStr)?.toLocal();
   if (d == null) return '';
   final now = DateTime.now();
   final diff = now.difference(d);
@@ -19,7 +19,7 @@ String formatTime(String? dateStr) {
 
 String formatMsgTime(String? dateStr) {
   if (dateStr == null || dateStr.isEmpty) return '';
-  final d = DateTime.tryParse(dateStr);
+  final d = DateTime.tryParse(dateStr)?.toLocal();
   if (d == null) return '';
   return '${_pad(d.hour)}:${_pad(d.minute)}';
 }
