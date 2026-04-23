@@ -72,10 +72,12 @@ class SocketService {
       debugPrint('[WS] connect error: $err');
       final errStr = err.toString();
       if (errStr.contains('令牌无效') || errStr.contains('已过期') || errStr.contains('认证失败')) {
-        debugPrint('[WS] auth failed, stopping reconnection');
+        // token 过期时仅停止重连，不触发强制下线
+        // API 层会自动刷新 token，刷新后由 ensureConnected() 用新 token 重连
+        // 真正被踢下线的事件由服务端 auth:kicked 消息处理
+        debugPrint('[WS] auth failed, stopping reconnection to allow token refresh');
         _stopHeartbeat();
         _socket?.disconnect();
-        _emitLocal('auth:kicked', {'reason': '登录已过期，请重新登录'});
       }
     });
 
