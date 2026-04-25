@@ -283,12 +283,53 @@ class ChatProvider extends ChangeNotifier {
     try {
       final data = await api.get('/messages', params: {'conversationId': convId, 'limit': 50});
       final list = List<Map<String, dynamic>>.from(data is List ? data : (data?['list'] ?? []));
-      _messages[convId] = list;
+
+      // 保留本地 pending/failed 消息，防止 reload 时覆盖掉尚未收到服务端确认的消息
+      final serverMsgIds = list.map((m) => m['messageId']?.toString()).whereType<String>().toSet();
+      final serverClientIds = list.map((m) => m['clientMsgId']?.toString()).whereType<String>().toSet();
+      final pendingMsgs = (_messages[convId] ?? []).where((m) {
+        final state = m['sendState']?.toString();
+        if (state != 'sending' && state != 'failed') return false;
+        final mid = m['messageId']?.toString();
+        final cid = m['clientMsgId']?.toString();
+        if (mid != null && serverMsgIds.contains(mid)) return false;
+        if (cid != null && serverClientIds.contains(cid)) return false;
+        return true;
+      }).toList();
+
+      _messages[convId] = [...list, ...pendingMsgs];
       _messagesLoadTime[convId] = DateTime.now();
       notifyListeners();
     } catch (e) {
       rethrow;
     }
+  }
+
+  /// 断线重连后补拉当前会话断线期间丢失的消息（增量同步，不替换现有列表）
+  Future<void> _syncMissedMessages(String convId) async {
+    final msgs = _messages[convId];
+    if (msgs == null || msgs.isEmpty) return;
+    int maxSeq = 0;
+    for (final m in msgs) {
+      final seq = (m['seq'] as num?)?.toInt() ?? 0;
+      if (seq > maxSeq) maxSeq = seq;
+    }
+    if (maxSeq == 0) return;
+    try {
+      final data = await api.get('/messages/sync', params: {
+        'conversationId': convId,
+        'afterSeq': maxSeq,
+        'limit': 100,
+      });
+      final newMsgs = List<Map<String, dynamic>>.from(data is List ? data : []);
+      if (newMsgs.isEmpty) return;
+      final existing = _messages[convId] ?? [];
+      final existingIds = existing.map((m) => m['messageId']?.toString()).whereType<String>().toSet();
+      final toAdd = newMsgs.where((m) => !existingIds.contains(m['messageId']?.toString())).toList();
+      if (toAdd.isEmpty) return;
+      _messages[convId] = [...existing, ...toAdd];
+      notifyListeners();
+    } catch (_) {}
   }
 
   /// 加载更早的历史消息（分页），返回加载的条数（0 表示没有更多）
@@ -480,6 +521,10 @@ class ChatProvider extends ChangeNotifier {
     }
     debugPrint('[ChatProvider] socket reconnected, refreshing data');
     loadConversations().catchError((_) {});
+    // 补拉当前会话断线期间丢失的消息
+    if (_currentConvId != null) {
+      _syncMissedMessages(_currentConvId!).catchError((_) {});
+    }
   }
 
   void _onNewMessage(dynamic data) {
