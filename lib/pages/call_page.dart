@@ -60,6 +60,8 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   bool _initialOfferSent = false;
   bool _remoteDescriptionReady = false;
   bool _pendingOfferAfterInit = false;
+  // 主叫方收到对方接听确认后置 true，用于过滤竞态残留的 call:timeout
+  bool _callAccepted = false;
   final Completer<void> _audioReady = Completer<void>();
   Map<String, dynamic>? _pendingRemoteSdp;
   String _statusText = '正在拨号...';
@@ -614,6 +616,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     final callId = data['callId']?.toString();
     if (callId != widget.callId) return;
 
+    // 对方已接听，后续到来的 call:timeout 属于竞态残留，应忽略
+    _callAccepted = true;
+
     if (_peer == null) {
       _pendingOfferAfterInit = true;
       return;
@@ -648,6 +653,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     if (data is! Map) return;
     final callId = data['callId']?.toString();
     if (callId != widget.callId || !mounted) return;
+
+    // 被叫方进入 CallPage 时已完成接听，收到超时事件属于竞态残留，忽略
+    if (!widget.isCaller) return;
+    // 主叫方：若已收到接听确认则忽略（服务端竞态：超时与接听同时发生）
+    if (_callAccepted) return;
 
     AppToast.show(context, '对方暂未接听');
     unawaited(_safePop());
