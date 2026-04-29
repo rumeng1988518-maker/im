@@ -37,6 +37,7 @@ import 'package:im_client/pages/chat_user_settings_page.dart';
 import 'package:im_client/pages/red_packet_detail_page.dart';
 import 'package:im_client/widgets/image_gallery_page.dart';
 import 'package:im_client/utils/image_saver.dart';
+import 'package:im_client/utils/call_permission_helper.dart';
 
 class ChatPage extends StatefulWidget {
   final String conversationId;
@@ -1158,6 +1159,8 @@ class _ChatPageState extends State<ChatPage> {
     );
 
     if (callType == null || !mounted) return;
+    final hasPermission = await CallPermissionHelper.requestCallPermissions(context, callType);
+    if (!hasPermission || !mounted) return;
     await _startCall(conv, callType);
   }
 

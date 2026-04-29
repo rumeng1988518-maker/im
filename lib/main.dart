@@ -16,6 +16,7 @@ import 'package:im_client/utils/error_message.dart';
 import 'package:im_client/services/notification_service.dart';
 import 'package:im_client/services/foreground_service.dart';
 import 'package:im_client/utils/notification_sound.dart';
+import 'package:im_client/utils/call_permission_helper.dart';
 import 'package:im_client/services/push_token_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io' show Platform;
@@ -413,6 +414,15 @@ class _IncomingCallGateState extends State<_IncomingCallGate> with WidgetsBindin
     setState(() => _acting = true);
 
     try {
+      final callType = callProvider.incomingCall?.callType ?? 'voice';
+      final hasPermission =
+          await CallPermissionHelper.requestCallPermissions(context, callType);
+      if (!mounted) return;
+      if (!hasPermission) {
+        setState(() => _acting = false);
+        return;
+      }
+
       final payload = await callProvider.acceptIncomingCall();
       if (!mounted) return;
 

@@ -1,4 +1,4 @@
-package XOEh.KNNGmEXEFC.XieKRW
+package one.excoin.im
 
 import android.content.Intent
 import android.net.Uri

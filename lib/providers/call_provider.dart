@@ -225,11 +225,14 @@ class CallProvider extends ChangeNotifier {
   }
 
   Map<String, dynamic> _normalizeRtcConfig(dynamic rawConfig) {
-    final fallback = {
-      'iceServers': [
-        {'urls': ['stun:stun.l.google.com:19302']},
-      ],
-    };
+    // 兜底列表：国内可达 STUN（腾讯、小米）+ 国际 STUN 并行探测
+    const fallbackIceServers = [
+      {'urls': ['stun:stun.qq.com:3478']},
+      {'urls': ['stun:stun.miwifi.com:3478']},
+      {'urls': ['stun:stun.l.google.com:19302']},
+      {'urls': ['stun:stun1.l.google.com:19302']},
+    ];
+    final fallback = {'iceServers': fallbackIceServers};
 
     if (rawConfig is! Map) return fallback;
     final source = Map<String, dynamic>.from(rawConfig);

@@ -196,10 +196,14 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       }
     };
 
-    // 部分安卓设备只触发 onAddStream，不触发 onTrack
+    // 部分安卓设备只触发 onAddStream，不触发 onTrack；
+    // 另一种场景：onTrack 对音频触发时流里还没有视频轨，onTrack 对视频触发时
+    // event.streams 为空，导致 _remoteStream 有值但 _remoteHasVideo=false，
+    // 此时 onAddStream 带着完整流来，不能因为 _remoteStream != null 就跳过。
+    // 规则：只要 _remoteHasVideo 尚未为 true，就用 onAddStream 的流覆盖更新。
     // ignore: deprecated_member_use
     peer.onAddStream = (stream) {
-      if (_remoteStream != null) return; // 已有 onTrack 处理
+      if (_remoteStream != null && _remoteHasVideo) return; // 已有完整流，跳过
       _remoteStream = stream;
       _remoteRenderer.srcObject = stream;
       final hasVideo = stream.getVideoTracks().isNotEmpty;
@@ -362,6 +366,39 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _startStatsMonitor();
     // 启动远程音频轨道健康监控
     _startTrackHealthMonitor();
+
+    // ── 修复4：视频通话连接后重新确认扬声器路由 ──
+    // 部分国产安卓 ROM 在系统弹出权限弹窗期间会重置音频路由，
+    // 导致视频通话接通后声音仍走听筒，用户以为没有声音。
+    if (!kIsWeb && widget.callType == 'video') {
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (!mounted || !_connected) return;
+        try {
+          Helper.setSpeakerphoneOn(true);
+          if (mounted) setState(() => _speakerEnabled = true);
+        } catch (_) {}
+      });
+    }
+
+    // ── 修复5：连接后 6 秒内检测视频是否就绪 ──
+    // 若视频通话连接后超过 6 秒仍无远端视频画面，说明流信息未能正常更新，
+    // 尝试重新同步 renderer（处理 onTrack/onAddStream 未触发的边缘情况）。
+    if (widget.callType == 'video') {
+      Timer(const Duration(seconds: 6), () {
+        if (!mounted || !_connected) return;
+        if (!_remoteHasVideo) {
+          final stream = _remoteStream;
+          if (stream != null && stream.getVideoTracks().isNotEmpty) {
+            debugPrint('[CallPage] Post-connect video sync: stream has video tracks but _remoteHasVideo=false, fixing');
+            _remoteRenderer.srcObject = stream;
+            if (mounted) setState(() => _remoteHasVideo = true);
+          } else if (stream != null) {
+            // 流存在但确实无视频轨道，提示用户对方未开启摄像头
+            debugPrint('[CallPage] Post-connect: no remote video tracks in stream');
+          }
+        }
+      });
+    }
   }
 
   // ── 网络质量监控 ──
@@ -512,14 +549,27 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     final audioTracks = stream.getAudioTracks();
     if (audioTracks.isEmpty) {
       debugPrint('[CallPage] Remote audio track missing');
-      return;
+    } else {
+      for (final track in audioTracks) {
+        // 如果远程音频轨道被意外禁用（部分安卓设备弱网后出现），重新启用
+        if (!track.enabled) {
+          debugPrint('[CallPage] Remote audio track disabled, re-enabling');
+          track.enabled = true;
+        }
+      }
     }
 
-    for (final track in audioTracks) {
-      // 如果远程音频轨道被意外禁用（部分安卓设备弱网后出现），重新启用
-      if (!track.enabled) {
-        debugPrint('[CallPage] Remote audio track disabled, re-enabling');
-        track.enabled = true;
+    // 检查远程视频轨道（部分安卓设备在弱网恢复后视频轨道可能被禁用）
+    if (widget.callType == 'video') {
+      final videoTracks = stream.getVideoTracks();
+      for (final track in videoTracks) {
+        if (!track.enabled) {
+          debugPrint('[CallPage] Remote video track disabled, re-enabling');
+          track.enabled = true;
+          if (mounted && !_remoteHasVideo) {
+            setState(() => _remoteHasVideo = true);
+          }
+        }
       }
     }
 
@@ -794,11 +844,13 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     } catch (e) {
       if (!mounted) return;
       setState(() => _cameraEnabled = false);
-      AppToast.show(context, ErrorMessage.from(e, fallback: '开启摄像头失败'));
+      // syncApi=false 表示初始化阶段（非用户手动点击），给出更友好的引导提示
+      final msg = syncApi
+          ? ErrorMessage.from(e, fallback: '开启摄像头失败')
+          : '摄像头启动失败，通话将以语音模式继续\n可点击「开启摄像头」按钮重试';
+      AppToast.show(context, msg, duration: const Duration(seconds: 4));
     }
   }
-
-  Future<void> _disableVideoTrack() async {
     final track = _videoTrack;
     if (track == null) {
       setState(() => _cameraEnabled = false);
@@ -873,9 +925,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     List<Map<String, dynamic>> iceServers;
 
     if (rawIceServers is! List || rawIceServers.isEmpty) {
-      iceServers = [
-        {'urls': ['stun:stun.l.google.com:19302']},
-      ];
+      iceServers = _fallbackIceServers;
     } else {
       iceServers = <Map<String, dynamic>>[];
       for (final item in rawIceServers) {
@@ -896,9 +946,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       }
 
       if (iceServers.isEmpty) {
-        iceServers = [
-          {'urls': ['stun:stun.l.google.com:19302']},
-        ];
+        iceServers = _fallbackIceServers;
       }
     }
 
@@ -909,6 +957,17 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       'iceCandidatePoolSize': 1,
     };
   }
+
+  /// 客户端兜底 ICE 服务器列表（服务端未下发或解析失败时使用）
+  /// 同时包含国内可访问的 STUN 和国际 STUN，ICE 框架会并行探测所有候选。
+  static const List<Map<String, dynamic>> _fallbackIceServers = [
+    // 国内可达 STUN（腾讯、小米）
+    {'urls': ['stun:stun.qq.com:3478']},
+    {'urls': ['stun:stun.miwifi.com:3478']},
+    // 国际 STUN（对未被墙的网络）
+    {'urls': ['stun:stun.l.google.com:19302']},
+    {'urls': ['stun:stun1.l.google.com:19302']},
+  ];
 
   Widget _buildVoiceCenter() {
     return Center(
