@@ -851,6 +851,8 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       AppToast.show(context, msg, duration: const Duration(seconds: 4));
     }
   }
+
+  Future<void> _disableVideoTrack() async {
     final track = _videoTrack;
     if (track == null) {
       setState(() => _cameraEnabled = false);
